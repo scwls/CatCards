@@ -44,6 +44,9 @@ import kotlin.math.abs
 import kotlin.math.min
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import kotlinx.coroutines.delay
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.offset
@@ -58,7 +61,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.Switch
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.ui.window.Dialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -144,90 +152,123 @@ fun FlashcardApp(modifier: Modifier = Modifier) {
                 blocks.remove(block)
                 saveBlocksToStorage(context, blocks)
             },
+            onRenameBlock = { block, newName ->
+                val index = blocks.indexOf(block)
+                if (index != -1) {
+                    // Используем .copy(), так как это data class
+                    blocks[index] = block.copy(name = newName)
+                    saveBlocksToStorage(context, blocks)
+                }
+            },
             modifier = modifier
         )
     } else {
-        // Экран карточек
-        FlashcardScreen(
-            session = activeSession!!,
-            isReverseMode = isReverseMode,
-            onBack = { activeSession = null },
-            onProgressChanged = { saveBlocksToStorage(context, blocks) },
-            modifier = modifier
-        )
+        if (activeSession!!.mode == StudyMode.SWIPE) {
+            // Экран карточек
+            FlashcardScreen(
+                session = activeSession!!,
+                isReverseMode = isReverseMode,
+                onBack = { activeSession = null },
+                onProgressChanged = { saveBlocksToStorage(context, blocks) },
+                modifier = modifier
+            )
+        } else {
+            // Экран плиточек
+            TilesScreen(
+                session = activeSession!!,
+                isReverseMode = isReverseMode,
+                onBack = { activeSession = null },
+                onProgressChanged = { saveBlocksToStorage(context, blocks) },
+                modifier = modifier
+            )
+        }
     }
 
-    // Диалоговое окно выбора режима обучения
-    if (blockForDialog != null) {
-        val block = blockForDialog!!
-        val mistakesCount = block.cards.count { it.isKnown == false }
-        
-        Dialog(onDismissRequest = { blockForDialog = null }) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+        // Диалоговое окно выбора режима обучения
+        if (blockForDialog != null) {
+            // Находим САМУЮ СВЕЖУЮ версию колоды в списке по её изначальному объекту
+            // Если мы её переименовали, старый blockForDialog будет содержать старое имя.
+            // Поэтому мы ищем её по индексу или совпадению карточек.
+            val latestBlock = blocks.find { it.cards == blockForDialog!!.cards } ?: blockForDialog!!
+            val mistakesCount = latestBlock.cards.count { it.isKnown == false }
+            
+            // Локальное состояние для переключателя режимов (Свайпы или Плиточки)
+            var selectedMode by remember { mutableStateOf(StudyMode.SWIPE) }
+            
+            Dialog(onDismissRequest = { blockForDialog = null }) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
                 ) {
-                    Text(
-                        text = block.name,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                    Text(
-                        text = "Выберите режим изучения",
-                        style = MaterialTheme.typography.bodyMedium,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(bottom = 24.dp)
-                    )
-                    
-                    Button(
-                        onClick = {
-                            // Сбрасываем прогресс для всей колоды
-                            block.cards.forEach { it.isKnown = null }
-                            saveBlocksToStorage(context, blocks)
-                            activeSession = StudySession(block.name, block.cards)
-                            blockForDialog = null
-                        },
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text("Учить всю колоду с начала")
-                    }
-                    
-                    if (mistakesCount > 0) {
+                        Text(
+                            text = latestBlock.name,
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                        
+                        // Переключатель типа игры (Сегментированные кнопки)
+                        SingleChoiceSegmentedButtonRow(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)
+                        ) {
+                            val options = listOf("Свайпы", "Плиточки")
+                            options.forEachIndexed { index, label ->
+                                val mode = if (index == 0) StudyMode.SWIPE else StudyMode.TILES
+                                SegmentedButton(
+                                    selected = selectedMode == mode,
+                                    onClick = { selectedMode = mode },
+                                    shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size)
+                                ) {
+                                    Text(text = label)
+                                }
+                            }
+                        }
+                        
                         Button(
                             onClick = {
-                                // Берем только те карточки, где была ошибка
-                                val mistakes = block.cards.filter { it.isKnown == false }
-                                // Сбрасываем их статус, чтобы снова их угадывать
-                                mistakes.forEach { it.isKnown = null }
+                                latestBlock.cards.forEach { it.isKnown = null }
                                 saveBlocksToStorage(context, blocks)
-                                activeSession = StudySession("${block.name} (Ошибки)", mistakes)
+                                activeSession = StudySession(latestBlock.name, latestBlock.cards, selectedMode)
                                 blockForDialog = null
                             },
                             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
                         ) {
-                            Text("Учить ошибки ($mistakesCount)")
+                            Text("Всю колоду с начала")
                         }
-                    }
-                    
-                    TextButton(
-                        onClick = { blockForDialog = null },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Отмена", color = Color.Gray)
+                        
+                        if (mistakesCount > 0) {
+                            Button(
+                                onClick = {
+                                    val mistakes = latestBlock.cards.filter { it.isKnown == false }
+                                    mistakes.forEach { it.isKnown = null }
+                                    saveBlocksToStorage(context, blocks)
+                                    activeSession = StudySession("${latestBlock.name} (Ошибки)", mistakes, selectedMode)
+                                    blockForDialog = null
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                            ) {
+                                Text("Только ошибки ($mistakesCount)")
+                            }
+                        }
+                        
+                        TextButton(
+                            onClick = { blockForDialog = null },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Отмена", color = Color.Gray)
+                        }
                     }
                 }
             }
         }
-    }
 }
 
 @Composable
@@ -238,6 +279,7 @@ fun BlockSelectionScreen(
     onBlockSelected: (FlashcardBlock) -> Unit,
     onImportClick: () -> Unit,
     onDeleteBlock: (FlashcardBlock) -> Unit,
+    onRenameBlock: (FlashcardBlock, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -285,7 +327,10 @@ fun BlockSelectionScreen(
         // LazyColumn - это специальный компонент для списков. 
         // Он рисует только те элементы, которые сейчас видны на экране (экономит память).
         
+        var blockForAction by remember { mutableStateOf<FlashcardBlock?>(null) }
         var blockToDelete by remember { mutableStateOf<FlashcardBlock?>(null) }
+        var blockToRename by remember { mutableStateOf<FlashcardBlock?>(null) }
+        var newBlockName by remember { mutableStateOf("") }
         
         LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             items(blocks) { block ->
@@ -295,7 +340,7 @@ fun BlockSelectionScreen(
                         .pointerInput(Unit) {
                             detectTapGestures(
                                 onTap = { onBlockSelected(block) },
-                                onLongPress = { blockToDelete = block }
+                                onLongPress = { blockForAction = block }
                             )
                         },
                     elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
@@ -310,6 +355,89 @@ fun BlockSelectionScreen(
             }
         }
         
+        if (blockForAction != null) {
+            Dialog(onDismissRequest = { blockForAction = null }) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = blockForAction!!.name,
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(bottom = 16.dp),
+                            textAlign = TextAlign.Center
+                        )
+                        
+                        Button(
+                            onClick = {
+                                blockToRename = blockForAction
+                                newBlockName = blockForAction!!.name
+                                blockForAction = null
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                        ) {
+                            Text("Переименовать")
+                        }
+                        
+                        Button(
+                            onClick = {
+                                blockToDelete = blockForAction
+                                blockForAction = null
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                        ) {
+                            Text("Удалить")
+                        }
+                        
+                        TextButton(
+                            onClick = { blockForAction = null },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Отмена", color = Color.Gray)
+                        }
+                    }
+                }
+            }
+        }
+        
+        if (blockToRename != null) {
+            AlertDialog(
+                onDismissRequest = { blockToRename = null },
+                title = { Text("Переименовать колоду") },
+                text = {
+                    OutlinedTextField(
+                        value = newBlockName,
+                        onValueChange = { newBlockName = it },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        if (newBlockName.isNotBlank()) {
+                            onRenameBlock(blockToRename!!, newBlockName)
+                        }
+                        blockToRename = null
+                    }) {
+                        Text("Сохранить")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { blockToRename = null }) {
+                        Text("Отмена")
+                    }
+                }
+            )
+        }
+
         if (blockToDelete != null) {
             AlertDialog(
                 onDismissRequest = { blockToDelete = null },
@@ -554,6 +682,202 @@ fun FlashcardUI(
     }
 }
 
+@Composable
+fun TilesScreen(
+    session: StudySession,
+    isReverseMode: Boolean,
+    onBack: () -> Unit,
+    onProgressChanged: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var currentCards by remember(session) { mutableStateOf(session.cards) }
+    var currentChunkIndex by remember { mutableStateOf(0) }
+
+    // Разбиваем карточки на группы по 4 штуки
+    val chunks = remember(currentCards) { currentCards.chunked(4) }
+
+    Column(modifier = modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+        // Верхняя панель с кнопкой "Назад"
+        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.Start) {
+            Button(onClick = onBack) { Text("<- Назад") }
+        }
+
+        if (currentChunkIndex < chunks.size) {
+            val currentChunk = chunks[currentChunkIndex]
+            
+            // Перемешиваем левый и правый столбцы независимо друг от друга
+            val leftItems = remember(currentChunk) { currentChunk.shuffled() }
+            val rightItems = remember(currentChunk) { currentChunk.shuffled() }
+
+            // Состояния выделения и ошибок
+            var selectedLeft by remember { mutableStateOf<Flashcard?>(null) }
+            var selectedRight by remember { mutableStateOf<Flashcard?>(null) }
+            var matched by remember { mutableStateOf(setOf<Flashcard>()) }
+            var errorPairs by remember { mutableStateOf(setOf<Flashcard>()) }
+            val coroutineScope = rememberCoroutineScope()
+
+            // Логика проверки совпадения
+            val checkMatch = {
+                if (selectedLeft != null && selectedRight != null) {
+                    val leftCard = selectedLeft!!
+                    val rightCard = selectedRight!!
+                    
+                    if (leftCard == rightCard) {
+                        // Правильно! 
+                        matched = matched + leftCard
+                        if (leftCard.isKnown != false) {
+                            leftCard.isKnown = true
+                        }
+                        onProgressChanged()
+                        
+                        val currentMatchedSize = matched.size
+                        val totalPairsResolved = currentMatchedSize + (errorPairs.size / 2)
+                        
+                        selectedLeft = null
+                        selectedRight = null
+                        
+                        // Если ВСЕ 4 пары отгаданы (или провалены), переходим дальше
+                        if (totalPairsResolved == currentChunk.size) {
+                            coroutineScope.launch {
+                                delay(600) // Даем посмотреть на последнюю пару
+                                currentChunkIndex++
+                                matched = emptySet()
+                                errorPairs = emptySet()
+                            }
+                        }
+                    } else {
+                        // Ошибка!
+                        leftCard.isKnown = false
+                        rightCard.isKnown = false
+                        onProgressChanged()
+                        
+                        errorPairs = errorPairs + leftCard + rightCard
+                        
+                        selectedLeft = null
+                        selectedRight = null
+                        
+                        val totalPairsResolved = matched.size + (errorPairs.size / 2)
+                        if (totalPairsResolved == currentChunk.size) {
+                             coroutineScope.launch {
+                                delay(1000) 
+                                currentChunkIndex++
+                                matched = emptySet()
+                                errorPairs = emptySet()
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text(
+                text = "Найдите пары (${currentChunkIndex + 1}/${chunks.size}):", 
+                modifier = Modifier.padding(bottom = 16.dp), 
+                style = MaterialTheme.typography.titleLarge
+            )
+
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                // Левая колонка
+                Column(modifier = Modifier.weight(1f)) {
+                    leftItems.forEach { card ->
+                        val text = if (isReverseMode) card.back else card.front
+                        val isMatched = matched.contains(card)
+                        // Карточка красная ТОЛЬКО если она есть в списке ошибок
+                        val isError = errorPairs.contains(card)
+                        val isSelected = selectedLeft == card
+                        
+                        val isDisabled = isMatched || isError
+
+                        TileButton(text = text, isMatched = isMatched, isSelected = isSelected, isError = isError, isDisabled = isDisabled) {
+                            if (!isDisabled) {
+                                // Если в момент клика уже идет проверка (оба выбраны), игнорируем клик
+                                if (selectedLeft != null && selectedRight != null) return@TileButton
+                                
+                                // Если мы кликнули на новую карточку, сразу назначаем её выбранной
+                                selectedLeft = if (selectedLeft == card) null else card
+                                
+                                // И только если мы ВЫБРАЛИ карточку (а не сняли выделение)
+                                // мы запускаем проверку
+                                if (selectedLeft != null) {
+                                    checkMatch()
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                // Правая колонка
+                Column(modifier = Modifier.weight(1f)) {
+                    rightItems.forEach { card ->
+                        val text = if (isReverseMode) card.front else card.back
+                        val isMatched = matched.contains(card)
+                        val isError = errorPairs.contains(card)
+                        val isSelected = selectedRight == card
+                        
+                        val isDisabled = isMatched || isError
+
+                        TileButton(text = text, isMatched = isMatched, isSelected = isSelected, isError = isError, isDisabled = isDisabled) {
+                            if (!isDisabled) {
+                                // Если в момент клика уже идет проверка (оба выбраны), игнорируем клик
+                                if (selectedLeft != null && selectedRight != null) return@TileButton
+                                
+                                selectedRight = if (selectedRight == card) null else card
+                                
+                                if (selectedRight != null) {
+                                    checkMatch()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // Результаты (такие же, как в свайпах)
+            val correctCount = currentCards.count { it.isKnown == true }
+            val wrongCount = currentCards.count { it.isKnown == false }
+            
+            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Text(text = "Тренировка завершена!", style = MaterialTheme.typography.headlineMedium)
+                Text(text = "Знаю: $correctCount | Не знаю: $wrongCount", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(vertical = 16.dp))
+                if (wrongCount > 0) {
+                    Button(
+                        onClick = {
+                            currentCards = currentCards.filter { it.isKnown == false }.onEach { it.isKnown = null }
+                            onProgressChanged()
+                            currentChunkIndex = 0
+                        },
+                        modifier = Modifier.padding(top = 16.dp)
+                    ) { Text("Доучить неизвестные слова") }
+                }
+                Button(onClick = onBack, modifier = Modifier.padding(top = 16.dp)) { Text("Вернуться в меню") }
+            }
+        }
+    }
+}
+
+@Composable
+fun TileButton(text: String, isMatched: Boolean, isSelected: Boolean, isError: Boolean, isDisabled: Boolean, onClick: () -> Unit) {
+    val backgroundColor = when {
+        isError -> Color(0xFFE57373)   // Красный для ошибок
+        isMatched -> Color(0xFF81C784) // Зеленый для правильных пар
+        isSelected -> MaterialTheme.colorScheme.primaryContainer // Выделено (синий)
+        else -> MaterialTheme.colorScheme.surfaceVariant // Обычный цвет
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+            .height(80.dp)
+            .clickable(enabled = !isDisabled, onClick = onClick), // Отключаем клик, если isDisabled = true
+        colors = CardDefaults.cardColors(containerColor = backgroundColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(text = text, textAlign = TextAlign.Center, modifier = Modifier.padding(8.dp), style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+}
+
 // Функция для парсинга CSV файла из папки assets
 fun loadFlashcardsFromCsv(context: Context, filename: String): List<Flashcard> {
     val flashcards = mutableListOf<Flashcard>()
@@ -636,10 +960,14 @@ fun getFileName(context: Context, uri: Uri): String {
     return result ?: "unknown_file"
 }
 
+// Режимы обучения
+enum class StudyMode { SWIPE, TILES }
+
 // Данные для текущей сессии изучения
 data class StudySession(
     val title: String,
-    val cards: List<Flashcard>
+    val cards: List<Flashcard>,
+    val mode: StudyMode = StudyMode.SWIPE
 )
 
 // --- ФУНКЦИИ ДЛЯ ЛОКАЛЬНОГО СОХРАНЕНИЯ ПРОГРЕССА ---
