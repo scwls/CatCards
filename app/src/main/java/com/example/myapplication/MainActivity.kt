@@ -1003,31 +1003,24 @@ fun TilesScreen(
                         matchedIds = matchedIds + leftId
                         if (leftCard.isKnown != false) leftCard.isKnown = true
                         onProgressChanged(true)
-                        val resolvedTiles = matchedIds.size * 2 + errorLeftIds.size + errorRightIds.size
-                        selectedLeftId = null
-                        selectedRightId = null
-                        if (resolvedTiles == currentChunk.size * 2) {
-                            coroutineScope.launch {
-                                delay(600)
-                                currentChunkIndex++
-                                session.currentPosition = currentChunkIndex
-                            }
-                        }
                     } else {
                         leftCard.isKnown = false
                         rightCard.isKnown = false
                         onProgressChanged(false)
                         errorLeftIds = errorLeftIds + leftId
                         errorRightIds = errorRightIds + rightId
-                        selectedLeftId = null
-                        selectedRightId = null
-                        val resolvedTiles = matchedIds.size * 2 + errorLeftIds.size + errorRightIds.size
-                        if (resolvedTiles == currentChunk.size * 2) {
-                            coroutineScope.launch {
-                                delay(600)
-                                currentChunkIndex++
-                                session.currentPosition = currentChunkIndex
-                            }
+                    }
+                    
+                    selectedLeftId = null
+                    selectedRightId = null
+                    
+                    // Переходим на следующий экран, когда ВСЕ левые карточки "израсходованы"
+                    // (либо угаданы правильно, либо были потрачены в ошибке)
+                    if (matchedIds.size + errorLeftIds.size == currentChunk.size) {
+                        coroutineScope.launch {
+                            delay(600)
+                            currentChunkIndex++
+                            session.currentPosition = currentChunkIndex
                         }
                     }
                 }
@@ -1046,6 +1039,7 @@ fun TilesScreen(
                         val isMatched = matchedIds.contains(item.id)
                         val isError = errorLeftIds.contains(item.id)
                         val isSelected = selectedLeftId == item.id
+                        // Новое: блокируем левую карточку, если она угадана ИЛИ если была ошибка
                         val isDisabled = isMatched || isError
 
                         TileButton(text = text, isMatched = isMatched, isSelected = isSelected, isError = isError, isDisabled = isDisabled) {
@@ -1064,7 +1058,7 @@ fun TilesScreen(
                         val isMatched = matchedIds.contains(item.id)
                         val isError = errorRightIds.contains(item.id)
                         val isSelected = selectedRightId == item.id
-                        val isDisabled = isMatched || isError
+                        val isDisabled = isMatched
 
                         TileButton(text = text, isMatched = isMatched, isSelected = isSelected, isError = isError, isDisabled = isDisabled) {
                             if (!isDisabled) {
@@ -1107,9 +1101,9 @@ private data class TileItem(val id: Int, val card: Flashcard)
 @Composable
 fun TileButton(text: String, isMatched: Boolean, isSelected: Boolean, isError: Boolean, isDisabled: Boolean, onClick: () -> Unit) {
     val backgroundColor = when {
-        isError -> Color(0xFFE57373)
-        isMatched -> Color(0xFF81C784)
-        isSelected -> MaterialTheme.colorScheme.primaryContainer
+        isMatched -> Color(0xFF81C784) // Отгаданные всегда зеленые
+        isSelected -> MaterialTheme.colorScheme.primaryContainer // Выделение перекрывает красный цвет
+        isError -> Color(0xFFE57373)   // Ошибки красные
         else -> MaterialTheme.colorScheme.surfaceVariant
     }
 
