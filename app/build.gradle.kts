@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -51,4 +52,9 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    implementation(platform("com.google.firebase:firebase-bom:33.1.0"))
+
+    // Подключаем нужные нам модули (версии указывать не нужно, BoM сделает это сам)
+    implementation("com.google.firebase:firebase-database") // Для синхронизации счетчика
+    implementation("com.google.firebase:firebase-storage")  // Для скачивания CSV колод
 }

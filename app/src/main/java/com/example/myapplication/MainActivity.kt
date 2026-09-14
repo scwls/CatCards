@@ -407,7 +407,7 @@ fun FlashcardApp(modifier: Modifier = Modifier) {
     var activeSession by remember { mutableStateOf<StudySession?>(null) }
     var pausedSession by remember { mutableStateOf<StudySession?>(null) }
     var blockForDialog by remember { mutableStateOf<FlashcardBlock?>(null) }
-    var isReverseMode by remember { mutableStateOf(false) }
+    var isReverseMode by remember { mutableStateOf(true) }
 
     val closeActiveSession = {
         val session = activeSession
@@ -533,7 +533,20 @@ fun FlashcardApp(modifier: Modifier = Modifier) {
                             onClick = {
                                 pausedForBlock.deferredErrorCards.forEach { it.isKnown = null }
                                 pausedForBlock.deferredErrorCards = emptyList()
-                                activeSession = pausedForBlock
+                                
+                                // Конвертируем прогресс, если поменялся режим игры (Свайпы <-> Плиточки)
+                                val newPosition = if (pausedForBlock.mode == selectedMode) {
+                                    pausedForBlock.currentPosition
+                                } else if (selectedMode == StudyMode.TILES) {
+                                    pausedForBlock.currentPosition / 4 // 4 карточки = 1 группа плиточек
+                                } else {
+                                    pausedForBlock.currentPosition * 4 // 1 группа плиточек = 4 карточки
+                                }
+                                
+                                activeSession = pausedForBlock.copy(
+                                    mode = selectedMode, 
+                                    currentPosition = newPosition
+                                )
                                 pausedSession = null
                                 blockForDialog = null
                             },
@@ -623,19 +636,19 @@ fun BlockSelectionScreen(
             modifier = Modifier.padding(bottom = 24.dp)
         ) {
             Text(
-                text = "Англ -> Рус",
-                color = if (!isReverseMode) MaterialTheme.colorScheme.primary else Color.Gray,
-                fontWeight = if (!isReverseMode) FontWeight.Bold else FontWeight.Normal
-            )
-            Switch(
-                checked = isReverseMode,
-                onCheckedChange = onModeChange,
-                modifier = Modifier.padding(horizontal = 16.dp)
-            )
-            Text(
                 text = "Рус -> Англ",
                 color = if (isReverseMode) MaterialTheme.colorScheme.primary else Color.Gray,
                 fontWeight = if (isReverseMode) FontWeight.Bold else FontWeight.Normal
+            )
+            Switch(
+                checked = !isReverseMode,
+                onCheckedChange = { onModeChange(!it) },
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+            Text(
+                text = "Англ -> Рус",
+                color = if (!isReverseMode) MaterialTheme.colorScheme.primary else Color.Gray,
+                fontWeight = if (!isReverseMode) FontWeight.Bold else FontWeight.Normal
             )
         }
 
