@@ -1,6 +1,11 @@
 package com.example.myapplication
 
+import android.Manifest
+import android.app.AlarmManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -29,6 +34,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -67,21 +73,124 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.ui.window.Dialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import com.example.myapplication.ui.theme.MyApplicationTheme
+import androidx.compose.runtime.LaunchedEffect
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.Calendar
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.storage.FirebaseStorage
+
+private const val STUDY_PREFS = "study_preferences"
+private const val LAST_STUDY_DATE = "last_study_date"
+private const val NICKNAME_PREFS = "user_preferences"
+private const val NICKNAME_KEY = "nickname"
+private const val FIREBASE_STORAGE_BUCKET = "gs://card-eng.firebasestorage.app"
+
+data class UserActivity(val learned: Long, val wrong: Long)
+
+fun incrementWrongToday(context: Context) {
+    val prefs = context.getSharedPreferences(STUDY_PREFS, Context.MODE_PRIVATE)
+    val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+    val count = if (prefs.getString("wrong_date", "") == today) prefs.getInt("wrong_value", 0) + 1 else 1
+    prefs.edit().putString("wrong_date", today).putInt("wrong_value", count).apply()
+    context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE).getString(NICKNAME_KEY, null)?.let {
+        FirebaseDatabase.getInstance().getReference("users/$it/wrong_today").setValue(count)
+    }
+}
+
+// Функция настройки ежедневных будильников на 14:00 и 20:00
+fun scheduleDailyAlarms(context: Context) {
+    val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
+    fun setAlarmForHour(hour: Int, requestCode: Int) {
+        val intent = Intent(context, StudyReminderReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val calendar = Calendar.getInstance().apply {
+            timeInMillis = System.currentTimeMillis()
+            set(Calendar.HOUR_OF_DAY, hour)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+        }
+
+        if (calendar.timeInMillis <= System.currentTimeMillis()) {
+            calendar.add(Calendar.DAY_OF_YEAR, 1)
+        }
+
+        alarmManager.setRepeating(
+            AlarmManager.RTC_WAKEUP,
+            calendar.timeInMillis,
+            AlarmManager.INTERVAL_DAY,
+            pendingIntent
+        )
+    }
+
+    setAlarmForHour(14, 14)
+    setAlarmForHour(20, 20)
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Запускаем будильники при старте
+        scheduleDailyAlarms(this)
+
         setContent {
-            MyApplicationTheme {
+            var pinkTheme by rememberSaveable { mutableStateOf(false) }
+            val context = LocalContext.current
+
+            // Запрос разрешения на уведомления для Android 13+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val permissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission()
+                ) { _ -> }
+                LaunchedEffect(Unit) {
+                    permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
+
+            MyApplicationTheme(pinkTheme = pinkTheme) {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    FlashcardApp(modifier = Modifier.padding(innerPadding))
+                    Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+                        var hasNickname by remember {
+                            mutableStateOf(!context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
+                                .getString(NICKNAME_KEY, null).isNullOrBlank())
+                        }
+                        if (!hasNickname) {
+                            RegistrationScreen(onRegistered = { name ->
+                                context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
+                                    .edit().putString(NICKNAME_KEY, name.trim()).apply()
+                                FirebaseDatabase.getInstance()
+                                    .getReference("users/${name.trim()}/learned_today")
+                                    .setValue(0L)
+                                hasNickname = true
+                            })
+                        } else {
+                            FlashcardApp(modifier = Modifier.fillMaxSize())
+                            BottomTools(
+                                pinkTheme = pinkTheme,
+                                onThemeChange = { pinkTheme = it },
+                                modifier = Modifier.align(Alignment.BottomStart)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -89,8 +198,193 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
+private fun RegistrationScreen(onRegistered: (String) -> Unit) {
+    var nickname by remember { mutableStateOf("") }
+    Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center) {
+        Text("Регистрация", style = MaterialTheme.typography.headlineMedium)
+        OutlinedTextField(nickname, { nickname = it }, label = { Text("Имя") }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp))
+        Button(onClick = { if (nickname.isNotBlank()) onRegistered(nickname) }, modifier = Modifier.fillMaxWidth()) {
+            Text("Войти")
+        }
+    }
+}
+
+private const val DEVELOPER_PASSWORD = "504680"
+
+@Composable
+private fun BottomTools(
+    pinkTheme: Boolean,
+    onThemeChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var showToolsMenu by remember { mutableStateOf(false) }
+    var showDeveloperDialog by remember { mutableStateOf(false) }
+
+    Box(modifier = modifier.padding(start = 16.dp, bottom = 16.dp)) {
+        FloatingActionButton(
+            onClick = { showToolsMenu = true },
+            modifier = Modifier.height(48.dp),
+            elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp)
+        ) { Text("⚙", fontSize = 22.sp) }
+    }
+
+    if (showToolsMenu) {
+        AlertDialog(
+            onDismissRequest = { showToolsMenu = false },
+            title = { Text("Настройки") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text("Тема", fontWeight = FontWeight.Bold)
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                        SegmentedButton(
+                            selected = !pinkTheme,
+                            onClick = { onThemeChange(false) },
+                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+                        ) { Text("BLUE") }
+                        SegmentedButton(
+                            selected = pinkTheme,
+                            onClick = { onThemeChange(true) },
+                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+                        ) { Text("ROSE") }
+                    }
+                    Button(
+                        onClick = {
+                            showToolsMenu = false
+                            showDeveloperDialog = true
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Войти в режим разработчика") }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showToolsMenu = false }) { Text("Готово") }
+            }
+        )
+    }
+    if (showDeveloperDialog) DeveloperDialog(onDismiss = { showDeveloperDialog = false })
+}
+
+@Composable
+private fun DeveloperDialog(onDismiss: () -> Unit) {
+    var password by remember { mutableStateOf("") }
+    var authorized by remember { mutableStateOf(false) }
+    var users by remember { mutableStateOf<Map<String, UserActivity>>(emptyMap()) }
+    var selectedUser by remember { mutableStateOf<String?>(null) }
+    var uploadMessage by remember { mutableStateOf<String?>(null) }
+    var usersError by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        val user = selectedUser ?: return@rememberLauncherForActivityResult
+        if (uri != null && getFileName(context, uri).endsWith(".csv", true)) {
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            if (bytes == null) {
+                uploadMessage = "Не удалось прочитать выбранный файл"
+                return@rememberLauncherForActivityResult
+            }
+            FirebaseStorage.getInstance(FIREBASE_STORAGE_BUCKET)
+                    .reference
+                    .child("decks/$user/${getFileName(context, uri)}")
+                    .putBytes(bytes)
+                    .addOnSuccessListener {
+                        uploadMessage = "Колода отправлена пользователю $user"
+                    }
+                    .addOnFailureListener { error ->
+                        uploadMessage = "Ошибка отправки: ${error.message ?: error.javaClass.simpleName}"
+                    }
+        }
+    }
+    LaunchedEffect(authorized) {
+        if (authorized) {
+            usersError = null
+            FirebaseDatabase.getInstance().getReference("users").get()
+                .addOnSuccessListener { snapshot ->
+                    users = snapshot.children.associate {
+                        it.key.orEmpty() to UserActivity(
+                            (it.child("learned_today").value as? Number)?.toLong().orZero(),
+                            (it.child("wrong_today").value as? Number)?.toLong().orZero()
+                        )
+                    }
+                }
+                .addOnFailureListener { error ->
+                    usersError = error.message ?: "Не удалось загрузить пользователей"
+                }
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (authorized) "Режим разработчика" else "Доступ разработчика") },
+        text = {
+            if (authorized) Column {
+                usersError?.let {
+                    Text(
+                        text = it,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
+                Text(
+                    text = selectedUser?.let { "Получатель: $it" } ?: "Выберите пользователя",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                LazyColumn(modifier = Modifier.height(240.dp)) {
+                    items(users.toList()) { (user, activity) ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clickable { selectedUser = user },
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (selectedUser == user) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant
+                                }
+                            )
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(user, fontWeight = FontWeight.Bold)
+                                Text("Правильных ответов: ${activity.learned}")
+                                Text("Неправильных ответов: ${activity.wrong}")
+                            }
+                        }
+                    }
+                }
+
+                Button(
+                    onClick = { picker.launch("*/*") },
+                    enabled = selectedUser != null,
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+                ) {
+                    Text("Выбрать CSV и отправить")
+                }
+
+                uploadMessage?.let { Text(it, modifier = Modifier.padding(top = 8.dp)) }
+            }
+            else OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                label = { Text("Пароль") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation()
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                if (authorized) onDismiss() else authorized = password == DEVELOPER_PASSWORD
+            }) { Text(if (authorized) "Закрыть" else "Войти") }
+        },
+        dismissButton = { if (!authorized) TextButton(onClick = onDismiss) { Text("Отмена") } }
+    )
+}
+
+private fun Long?.orZero(): Long = this ?: 0L
+
+@Composable
 fun FlashcardApp(modifier: Modifier = Modifier) {
-    // Наши данные: грузятся из сохраненного файла, либо берутся по умолчанию
     val context = LocalContext.current
     val blocks = remember {
         val savedBlocks = loadBlocksFromStorage(context)
@@ -110,22 +404,13 @@ fun FlashcardApp(modifier: Modifier = Modifier) {
         }
     }
 
-    // Активная сессия (то, что мы сейчас учим)
     var activeSession by remember { mutableStateOf<StudySession?>(null) }
-    // Одна незавершенная сессия, к которой можно вернуться из меню.
     var pausedSession by remember { mutableStateOf<StudySession?>(null) }
-    
-    // Блок, для которого открыто диалоговое окно
     var blockForDialog by remember { mutableStateOf<FlashcardBlock?>(null) }
-    
-    // Состояние: направление перевода (false = Англ->Рус, true = Рус->Англ)
     var isReverseMode by remember { mutableStateOf(false) }
 
     val closeActiveSession = {
         val session = activeSession
-        // В сессии «Только ошибки» карточки сбрасываются в null перед началом.
-        // Если пользователь вышел раньше времени, возвращаем неотвеченные карточки
-        // в список ошибок, а результаты уже сделанных попыток не меняем.
         session?.takeIf { it.isErrorsOnly }?.let { errorSession ->
             errorSession.deferredErrorCards = errorSession.cards.filter { it.isKnown == null }
             errorSession.deferredErrorCards.forEach { it.isKnown = false }
@@ -142,38 +427,33 @@ fun FlashcardApp(modifier: Modifier = Modifier) {
     ) { uri: Uri? ->
         if (uri != null) {
             val name = getFileName(context, uri)
-            // Проверяем, что файл действительно имеет расширение .csv
             if (name.endsWith(".csv", ignoreCase = true)) {
                 val cards = loadFlashcardsFromUri(context, uri)
                 if (cards.isNotEmpty()) {
-                    // Убираем расширение для красивого названия
                     val displayName = name.replace(".csv", "", ignoreCase = true)
                     blocks.add(FlashcardBlock(displayName, cards))
                     saveBlocksToStorage(context, blocks)
                 }
-            } else {
-                // Если файл не .csv, можно было бы показать ошибку, но пока просто игнорируем
-                // (В реальном приложении здесь обычно показывают Toast сообщение)
             }
         }
     }
 
     if (activeSession == null) {
-        // Главный экран: выбор блока
         BlockSelectionScreen(
             blocks = blocks,
             isReverseMode = isReverseMode,
             onModeChange = { isReverseMode = it },
-            onBlockSelected = { block -> blockForDialog = block }, // Открываем диалог вместо прямого перехода
+            onBlockSelected = { block -> blockForDialog = block },
             onImportClick = { filePickerLauncher.launch("*/*") },
+            onDownloadClick = { downloadSharedDecks(context, blocks) },
             onDeleteBlock = { block ->
-                blocks.remove(block)
+                val index = blocks.indexOfFirst { it === block }.takeIf { it >= 0 } ?: blocks.indexOf(block)
+                if (index >= 0) blocks.removeAt(index)
                 saveBlocksToStorage(context, blocks)
             },
             onRenameBlock = { block, newName ->
                 val index = blocks.indexOf(block)
                 if (index != -1) {
-                    // Используем .copy(), так как это data class
                     blocks[index] = block.copy(name = newName)
                     saveBlocksToStorage(context, blocks)
                 }
@@ -182,145 +462,124 @@ fun FlashcardApp(modifier: Modifier = Modifier) {
         )
     } else {
         if (activeSession!!.mode == StudyMode.SWIPE) {
-            // Экран карточек
             FlashcardScreen(
                 session = activeSession!!,
                 isReverseMode = isReverseMode,
                 onBack = closeActiveSession,
-                onProgressChanged = { saveBlocksToStorage(context, blocks) },
+                onProgressChanged = { correct ->
+                    saveBlocksToStorage(context, blocks)
+                    if (correct == true) incrementLearnedToday(context)
+                    if (correct == false) incrementWrongToday(context)
+                },
                 modifier = modifier
             )
         } else {
-            // Экран плиточек
             TilesScreen(
                 session = activeSession!!,
                 isReverseMode = isReverseMode,
                 onBack = closeActiveSession,
-                onProgressChanged = { saveBlocksToStorage(context, blocks) },
+                onProgressChanged = { correct ->
+                    saveBlocksToStorage(context, blocks)
+                    if (correct == true) incrementLearnedToday(context)
+                    if (correct == false) incrementWrongToday(context)
+                },
                 modifier = modifier
             )
         }
     }
 
-        // Диалоговое окно выбора режима обучения
-        if (blockForDialog != null) {
-            // Находим САМУЮ СВЕЖУЮ версию колоды в списке по её изначальному объекту
-            // Если мы её переименовали, старый blockForDialog будет содержать старое имя.
-            // Поэтому мы ищем её по индексу или совпадению карточек.
-            val latestBlock = blocks.find { it.cards == blockForDialog!!.cards } ?: blockForDialog!!
-            val mistakesCount = latestBlock.cards.count { it.isKnown == false }
-            val pausedForBlock = pausedSession?.takeIf {
-                it.sourceBlockName == latestBlock.name && it.hasUnfinishedContent()
-            }
-            
-            // Локальное состояние для переключателя режимов (Свайпы или Плиточки)
-            var selectedMode by remember { mutableStateOf(StudyMode.SWIPE) }
-            
-            Dialog(onDismissRequest = { blockForDialog = null }) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = latestBlock.name,
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-                        
-                        // Переключатель типа игры (Сегментированные кнопки)
-                        SingleChoiceSegmentedButtonRow(
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)
-                        ) {
-                            val options = listOf("Свайпы", "Плиточки")
-                            options.forEachIndexed { index, label ->
-                                val mode = if (index == 0) StudyMode.SWIPE else StudyMode.TILES
-                                SegmentedButton(
-                                    selected = selectedMode == mode,
-                                    onClick = { selectedMode = mode },
-                                    shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size)
-                                ) {
-                                    Text(text = label)
-                                }
-                            }
-                        }
+    if (blockForDialog != null) {
+        val latestBlock = blocks.find { it.cards == blockForDialog!!.cards } ?: blockForDialog!!
+        val mistakesCount = latestBlock.cards.count { it.isKnown == false }
+        val pausedForBlock = pausedSession?.takeIf {
+            it.sourceBlockName == latestBlock.name && it.hasUnfinishedContent()
+        }
+        var selectedMode by remember { mutableStateOf(StudyMode.SWIPE) }
 
-                        if (pausedForBlock != null) {
-                            Button(
-                                onClick = {
-                                    // Карточки, которые не успели показать до паузы,
-                                    // снова получают нейтральный статус в самой сессии.
-                                    pausedForBlock.deferredErrorCards.forEach { it.isKnown = null }
-                                    pausedForBlock.deferredErrorCards = emptyList()
-                                    activeSession = pausedForBlock
-                                    pausedSession = null
-                                    blockForDialog = null
-                                },
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-                            ) {
-                                Text("Продолжить (${pausedForBlock.progressLabel()})")
-                            }
+        Dialog(onDismissRequest = { blockForDialog = null }) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = latestBlock.name,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+
+                    SingleChoiceSegmentedButtonRow(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)
+                    ) {
+                        val options = listOf("Свайпы", "Плиточки")
+                        options.forEachIndexed { index, label ->
+                            val mode = if (index == 0) StudyMode.SWIPE else StudyMode.TILES
+                            SegmentedButton(
+                                selected = selectedMode == mode,
+                                onClick = { selectedMode = mode },
+                                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size)
+                            ) { Text(text = label) }
                         }
-                        
+                    }
+
+                    if (pausedForBlock != null) {
                         Button(
                             onClick = {
-                                latestBlock.cards.forEach { it.isKnown = null }
+                                pausedForBlock.deferredErrorCards.forEach { it.isKnown = null }
+                                pausedForBlock.deferredErrorCards = emptyList()
+                                activeSession = pausedForBlock
+                                pausedSession = null
+                                blockForDialog = null
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                        ) { Text("Продолжить (${pausedForBlock.progressLabel()})") }
+                    }
+
+                    Button(
+                        onClick = {
+                            latestBlock.cards.forEach { it.isKnown = null }
+                            saveBlocksToStorage(context, blocks)
+                            pausedSession = null
+                            activeSession = StudySession(latestBlock.name, latestBlock.cards.shuffled(), selectedMode)
+                            blockForDialog = null
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                    ) { Text("Всю колоду с начала") }
+
+                    if (mistakesCount > 0) {
+                        Button(
+                            onClick = {
+                                val mistakes = latestBlock.cards.filter { it.isKnown == false }.shuffled()
+                                mistakes.forEach { it.isKnown = null }
                                 saveBlocksToStorage(context, blocks)
                                 pausedSession = null
                                 activeSession = StudySession(
-                                    latestBlock.name,
-                                    latestBlock.cards.shuffled(),
-                                    selectedMode
+                                    title = "${latestBlock.name} (Ошибки)",
+                                    cards = mistakes,
+                                    mode = selectedMode,
+                                    isErrorsOnly = true,
+                                    sourceBlockName = latestBlock.name
                                 )
                                 blockForDialog = null
                             },
                             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-                        ) {
-                            Text("Всю колоду с начала")
-                        }
-                        
-                        if (mistakesCount > 0) {
-                            Button(
-                                onClick = {
-                                    val mistakes = latestBlock.cards
-                                        .filter { it.isKnown == false }
-                                        .shuffled()
-                                    mistakes.forEach { it.isKnown = null }
-                                    saveBlocksToStorage(context, blocks)
-                                    pausedSession = null
-                                    activeSession = StudySession(
-                                        title = "${latestBlock.name} (Ошибки)",
-                                        cards = mistakes,
-                                        mode = selectedMode,
-                                        isErrorsOnly = true,
-                                        sourceBlockName = latestBlock.name
-                                    )
-                                    blockForDialog = null
-                                },
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-                            ) {
-                                Text("Только ошибки ($mistakesCount)")
-                            }
-                        }
-                        
-                        TextButton(
-                            onClick = { blockForDialog = null },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Отмена", color = Color.Gray)
-                        }
+                        ) { Text("Только ошибки ($mistakesCount)") }
                     }
+
+                    TextButton(
+                        onClick = { blockForDialog = null },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Отмена", color = Color.Gray) }
                 }
             }
         }
+    }
 }
 
 @Composable
@@ -330,14 +589,16 @@ fun BlockSelectionScreen(
     onModeChange: (Boolean) -> Unit,
     onBlockSelected: (FlashcardBlock) -> Unit,
     onImportClick: () -> Unit,
+    onDownloadClick: () -> Unit,
     onDeleteBlock: (FlashcardBlock) -> Unit,
     onRenameBlock: (FlashcardBlock, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val learnedToday = getLearnedToday(context)
+
     Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp),
+        modifier = modifier.fillMaxSize().padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
@@ -346,21 +607,23 @@ fun BlockSelectionScreen(
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(bottom = 16.dp)
         )
-        
+
         Button(
             onClick = onImportClick,
             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
-        ) {
-            Text("Импортировать колоду (.csv)")
-        }
-        
-        // Переключатель режима изучения
+        ) { Text("Импортировать колоду (.csv)") }
+
+        Button(
+            onClick = onDownloadClick,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+        ) { Text("Загрузить присланные колоды") }
+
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(bottom = 24.dp)
         ) {
             Text(
-                text = "Англ -> Рус", 
+                text = "Англ -> Рус",
                 color = if (!isReverseMode) MaterialTheme.colorScheme.primary else Color.Gray,
                 fontWeight = if (!isReverseMode) FontWeight.Bold else FontWeight.Normal
             )
@@ -370,22 +633,25 @@ fun BlockSelectionScreen(
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
             Text(
-                text = "Рус -> Англ", 
+                text = "Рус -> Англ",
                 color = if (isReverseMode) MaterialTheme.colorScheme.primary else Color.Gray,
                 fontWeight = if (isReverseMode) FontWeight.Bold else FontWeight.Normal
             )
         }
 
-        // LazyColumn - это специальный компонент для списков. 
-        // Он рисует только те элементы, которые сейчас видны на экране (экономит память).
-        
         var blockForAction by remember { mutableStateOf<FlashcardBlock?>(null) }
         var blockToDelete by remember { mutableStateOf<FlashcardBlock?>(null) }
         var blockToRename by remember { mutableStateOf<FlashcardBlock?>(null) }
         var newBlockName by remember { mutableStateOf("") }
-        
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            items(blocks) { block ->
+
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            items(
+                items = blocks,
+                key = { block -> System.identityHashCode(block) }
+            ) { block ->
                 val correctCount = block.cards.count { it.isKnown == true }
                 val wrongCount = block.cards.count { it.isKnown == false }
                 Card(
@@ -401,17 +667,12 @@ fun BlockSelectionScreen(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                 ) {
                     Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(88.dp)
-                            .padding(16.dp)
+                        modifier = Modifier.fillMaxWidth().height(88.dp).padding(16.dp)
                     ) {
                         Text(
                             text = block.name,
                             style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier
-                                .align(Alignment.CenterStart)
-                                .padding(end = 72.dp)
+                            modifier = Modifier.align(Alignment.CenterStart).padding(end = 72.dp)
                         )
                         Text(
                             text = "${block.cards.size} карточек",
@@ -429,6 +690,15 @@ fun BlockSelectionScreen(
                 }
             }
         }
+
+        Text(
+            text = "Выучено за сегодня: $learnedToday",
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp, bottom = 24.dp), // Добавили отступ снизу
+            textAlign = TextAlign.Center, // Выровняли текст строго по центру
+            style = MaterialTheme.typography.titleMedium
+        )
         
         if (blockForAction != null) {
             Dialog(onDismissRequest = { blockForAction = null }) {
@@ -449,7 +719,6 @@ fun BlockSelectionScreen(
                             modifier = Modifier.padding(bottom = 16.dp),
                             textAlign = TextAlign.Center
                         )
-                        
                         Button(
                             onClick = {
                                 blockToRename = blockForAction
@@ -457,10 +726,7 @@ fun BlockSelectionScreen(
                                 blockForAction = null
                             },
                             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-                        ) {
-                            Text("Переименовать")
-                        }
-                        
+                        ) { Text("Переименовать") }
                         Button(
                             onClick = {
                                 blockToDelete = blockForAction
@@ -468,21 +734,16 @@ fun BlockSelectionScreen(
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-                        ) {
-                            Text("Удалить")
-                        }
-                        
+                        ) { Text("Удалить") }
                         TextButton(
                             onClick = { blockForAction = null },
                             modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Отмена", color = Color.Gray)
-                        }
+                        ) { Text("Отмена", color = Color.Gray) }
                     }
                 }
             }
         }
-        
+
         if (blockToRename != null) {
             AlertDialog(
                 onDismissRequest = { blockToRename = null },
@@ -497,18 +758,12 @@ fun BlockSelectionScreen(
                 },
                 confirmButton = {
                     TextButton(onClick = {
-                        if (newBlockName.isNotBlank()) {
-                            onRenameBlock(blockToRename!!, newBlockName)
-                        }
+                        if (newBlockName.isNotBlank()) onRenameBlock(blockToRename!!, newBlockName)
                         blockToRename = null
-                    }) {
-                        Text("Сохранить")
-                    }
+                    }) { Text("Сохранить") }
                 },
                 dismissButton = {
-                    TextButton(onClick = { blockToRename = null }) {
-                        Text("Отмена")
-                    }
+                    TextButton(onClick = { blockToRename = null }) { Text("Отмена") }
                 }
             )
         }
@@ -522,14 +777,10 @@ fun BlockSelectionScreen(
                     TextButton(onClick = {
                         onDeleteBlock(blockToDelete!!)
                         blockToDelete = null
-                    }) {
-                        Text("Удалить", color = MaterialTheme.colorScheme.error)
-                    }
+                    }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
                 },
                 dismissButton = {
-                    TextButton(onClick = { blockToDelete = null }) {
-                        Text("Отмена")
-                    }
+                    TextButton(onClick = { blockToDelete = null }) { Text("Отмена") }
                 }
             )
         }
@@ -541,10 +792,10 @@ fun FlashcardScreen(
     session: StudySession,
     isReverseMode: Boolean,
     onBack: () -> Unit,
-    onProgressChanged: () -> Unit,
+    onProgressChanged: (Boolean?) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Используем локальное состояние, чтобы можно было перезапускать список внутри сессии
+    val context = LocalContext.current
     var currentCards by remember(session) { mutableStateOf(session.cards) }
     var currentIndex by remember(session) { mutableStateOf(session.currentPosition) }
 
@@ -552,23 +803,15 @@ fun FlashcardScreen(
         modifier = modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Верхняя панель с кнопкой "Назад"
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
             horizontalArrangement = Arrangement.Start
         ) {
-            Button(onClick = onBack) {
-                Text("<- Назад")
-            }
+            Button(onClick = onBack) { Text("<- Назад") }
         }
 
-        // Основная часть с карточками
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f), // Занимает всё оставшееся место
+            modifier = Modifier.fillMaxWidth().weight(1f),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
@@ -584,77 +827,46 @@ fun FlashcardScreen(
                     isReverseMode = isReverseMode,
                     onSwipeRight = {
                         currentCard.isKnown = true
-                        onProgressChanged()
+                        onProgressChanged(true)
                         currentIndex++
                         session.currentPosition = currentIndex
                     },
                     onSwipeLeft = {
                         currentCard.isKnown = false
-                        onProgressChanged()
+                        onProgressChanged(false)
                         currentIndex++
                         session.currentPosition = currentIndex
                     }
                 )
 
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 32.dp, vertical = 16.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(
-                        text = "<- Не знаю",
-                        color = Color.Gray,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp
-                    )
-                    Text(
-                        text = "Знаю ->",
-                        color = Color.Gray,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp
-                    )
+                    Text(text = "<- Не знаю", color = Color.Gray, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Text(text = "Знаю ->", color = Color.Gray, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 }
             } else {
                 val correctCount = currentCards.count { it.isKnown == true }
                 val wrongCount = currentCards.count { it.isKnown == false }
-                
-                Text(
-                    text = "Тренировка завершена!",
-                    style = MaterialTheme.typography.headlineMedium
-                )
-                
-                Text(
-                    text = "Знаю: $correctCount | Не знаю: $wrongCount",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(vertical = 16.dp)
-                )
+
+                Text(text = "Тренировка завершена!", style = MaterialTheme.typography.headlineMedium)
+                Text(text = "Знаю: $correctCount | Не знаю: $wrongCount", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(vertical = 16.dp))
 
                 if (wrongCount > 0) {
                     Button(
                         onClick = {
-                            // Оставляем только те, что не знали, и сбрасываем их статус
-                            currentCards = currentCards
-                                .filter { it.isKnown == false }
-                                .onEach { it.isKnown = null }
-                                .shuffled()
+                            currentCards = currentCards.filter { it.isKnown == false }.onEach { it.isKnown = null }.shuffled()
                             session.cards = currentCards
                             session.currentPosition = 0
-                            onProgressChanged()
+                            onProgressChanged(null)
                             currentIndex = 0
                         },
                         modifier = Modifier.padding(top = 16.dp)
-                    ) {
-                        Text("Доучить неизвестные слова")
-                    }
+                    ) { Text("Доучить неизвестные слова") }
                 }
 
-                Button(
-                    onClick = onBack,
-                    modifier = Modifier.padding(top = 16.dp)
-                ) {
-                    Text("Вернуться в меню")
-                }
+                Button(onClick = onBack, modifier = Modifier.padding(top = 16.dp)) { Text("Вернуться в меню") }
             }
         }
     }
@@ -668,29 +880,18 @@ fun FlashcardUI(
     onSwipeLeft: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Состояние: показываем ли мы обратную сторону (перевод)
     var isFlipped by remember { mutableStateOf(false) }
-
-    // Анимация: смещение карточки по оси X
     val offsetX = remember { Animatable(0f) }
-    // Область корутин для запуска анимаций
     val coroutineScope = rememberCoroutineScope()
 
-    // Базовый цвет (меняется при клике/перевороте)
     val defaultColor = if (isFlipped) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primaryContainer
-    
-    // Определяем целевой цвет в зависимости от направления свайпа
     val targetColor = when {
-        offsetX.value > 0 -> Color(0xFF81C784) // Зеленый для "Знаю" (немного приглушенный)
-        offsetX.value < 0 -> Color(0xFFE57373) // Красный для "Не знаю"
+        offsetX.value > 0 -> Color(0xFF81C784)
+        offsetX.value < 0 -> Color(0xFFE57373)
         else -> defaultColor
     }
-    
-    // Считаем прогресс свайпа (от 0.0 до 1.0)
-    // Чем дальше тянем (до 300 пикселей), тем сильнее проявляется цвет
-    val dragFraction = min(abs(offsetX.value) / 300f, 0.8f) 
-    
-    // Плавно смешиваем базовый цвет и цвет свайпа
+
+    val dragFraction = min(abs(offsetX.value) / 300f, 0.8f)
     val backgroundColor = lerp(defaultColor, targetColor, dragFraction)
 
     Card(
@@ -698,61 +899,43 @@ fun FlashcardUI(
             .fillMaxWidth()
             .padding(32.dp)
             .height(300.dp)
-            // Применяем смещение к карточке
             .offset { IntOffset(offsetX.value.roundToInt(), 0) }
-            // Обработка клика: переворачиваем карточку
             .clickable { isFlipped = !isFlipped }
-            // Обработка свайпов (жестов)
-            // Мы передаем isFlipped как ключ (key). Если он меняется, Compose перезапускает этот блок.
             .pointerInput(isFlipped) {
-                // Разрешаем жесты свайпа ТОЛЬКО если карточка перевернута
                 if (isFlipped) {
                     detectHorizontalDragGestures(
                         onDragEnd = {
-                            // Когда отпускаем палец, решаем: улетаем за край или возвращаемся в центр
                             coroutineScope.launch {
-                                val threshold = 200f // Порог срабатывания свайпа (чуть больше, чтобы было удобнее)
+                                val threshold = 200f
                                 if (offsetX.value > threshold) {
-                                    // Улетаем вправо
                                     offsetX.animateTo(targetValue = 1000f, animationSpec = tween(300))
                                     onSwipeRight()
                                     isFlipped = false
-                                    offsetX.snapTo(0f) // Мгновенно возвращаем невидимую новую карточку в центр
+                                    offsetX.snapTo(0f)
                                 } else if (offsetX.value < -threshold) {
-                                    // Улетаем влево
                                     offsetX.animateTo(targetValue = -1000f, animationSpec = tween(300))
                                     onSwipeLeft()
                                     isFlipped = false
                                     offsetX.snapTo(0f)
                                 } else {
-                                    // Возвращаемся в центр, если свайп был слишком слабым
                                     offsetX.animateTo(targetValue = 0f, animationSpec = tween(300))
                                 }
                             }
                         },
                         onHorizontalDrag = { change, dragAmount ->
                             change.consume()
-                            // Пока тянем палец, двигаем карточку
-                            coroutineScope.launch {
-                                offsetX.snapTo(offsetX.value + dragAmount)
-                            }
+                            coroutineScope.launch { offsetX.snapTo(offsetX.value + dragAmount) }
                         }
                     )
                 }
             },
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-        // Устанавливаем динамический цвет, который мы рассчитали выше
-        colors = CardDefaults.cardColors(
-            containerColor = backgroundColor
-        )
+        colors = CardDefaults.cardColors(containerColor = backgroundColor)
     ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             val actualFront = if (isReverseMode) flashcard.back else flashcard.front
             val actualBack = if (isReverseMode) flashcard.front else flashcard.back
-            
+
             Text(
                 text = if (isFlipped) actualBack else actualFront,
                 style = MaterialTheme.typography.headlineLarge,
@@ -769,37 +952,26 @@ fun TilesScreen(
     session: StudySession,
     isReverseMode: Boolean,
     onBack: () -> Unit,
-    onProgressChanged: () -> Unit,
+    onProgressChanged: (Boolean?) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var currentCards by remember(session) { mutableStateOf(session.cards) }
     var currentChunkIndex by remember(session) { mutableStateOf(session.currentPosition) }
-    // Номер попытки нужен, чтобы при повторном прохождении заново перемешать плитки
-    // и сбросить состояние текущей группы.
     var roundId by remember(session) { mutableStateOf(0) }
-
-    // Разбиваем карточки на группы по 4 штуки
     val chunks = remember(currentCards) { currentCards.chunked(4) }
 
     Column(modifier = modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-        // Верхняя панель с кнопкой "Назад"
         Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.Start) {
             Button(onClick = onBack) { Text("<- Назад") }
         }
 
         if (currentChunkIndex < chunks.size) {
             val currentChunk = chunks[currentChunkIndex]
-
-            // Идентификатор не зависит от isKnown. Нельзя использовать Flashcard как
-            // ключ Set: isKnown изменяется в процессе игры и меняет hashCode data class.
-            val tileItems = remember(roundId, currentChunkIndex) {
-                currentChunk.mapIndexed { index, card -> TileItem(index, card) }
-            }
-            // Перемешиваем левый и правый столбцы независимо друг от друга.
+            val tileItems = remember(roundId, currentChunkIndex) { currentChunk.mapIndexed { index, card -> TileItem(index, card) } }
             val leftItems = remember(roundId, currentChunkIndex) { tileItems.shuffled() }
             val rightItems = remember(roundId, currentChunkIndex) { tileItems.shuffled() }
 
-            // Состояния выбранных, верных и ошибочно нажатых плиток текущей группы.
             var selectedLeftId by remember(roundId, currentChunkIndex) { mutableStateOf<Int?>(null) }
             var selectedRightId by remember(roundId, currentChunkIndex) { mutableStateOf<Int?>(null) }
             var matchedIds by remember(roundId, currentChunkIndex) { mutableStateOf(emptySet<Int>()) }
@@ -807,50 +979,36 @@ fun TilesScreen(
             var errorRightIds by remember(roundId, currentChunkIndex) { mutableStateOf(emptySet<Int>()) }
             val coroutineScope = rememberCoroutineScope()
 
-            // Логика проверки совпадения
             val checkMatch = {
                 if (selectedLeftId != null && selectedRightId != null) {
                     val leftId = selectedLeftId!!
                     val rightId = selectedRightId!!
                     val leftCard = currentChunk[leftId]
                     val rightCard = currentChunk[rightId]
-                    
+
                     if (leftId == rightId) {
-                        // Правильно! 
                         matchedIds = matchedIds + leftId
-                        if (leftCard.isKnown != false) {
-                            leftCard.isKnown = true
-                        }
-                        onProgressChanged()
-                        
+                        if (leftCard.isKnown != false) leftCard.isKnown = true
+                        onProgressChanged(true)
                         val resolvedTiles = matchedIds.size * 2 + errorLeftIds.size + errorRightIds.size
-                        
                         selectedLeftId = null
                         selectedRightId = null
-                        
-                        // Переходим дальше, когда использованы все плитки.
                         if (resolvedTiles == currentChunk.size * 2) {
                             coroutineScope.launch {
-                                delay(600) // Даем посмотреть на последнюю пару
+                                delay(600)
                                 currentChunkIndex++
                                 session.currentPosition = currentChunkIndex
                             }
                         }
                     } else {
-                        // Ошибка!
                         leftCard.isKnown = false
                         rightCard.isKnown = false
-                        onProgressChanged()
-                        
-                        // Красными и недоступными становятся только две выбранные
-                        // плитки. Их парные плитки в другом столбце остаются в игре.
+                        onProgressChanged(false)
                         errorLeftIds = errorLeftIds + leftId
                         errorRightIds = errorRightIds + rightId
                         selectedLeftId = null
                         selectedRightId = null
-
-                        val resolvedTiles = matchedIds.size * 2 +
-                            errorLeftIds.size + errorRightIds.size
+                        val resolvedTiles = matchedIds.size * 2 + errorLeftIds.size + errorRightIds.size
                         if (resolvedTiles == currentChunk.size * 2) {
                             coroutineScope.launch {
                                 delay(600)
@@ -863,83 +1021,62 @@ fun TilesScreen(
             }
 
             Text(
-                text = "Найдите пары (${currentChunkIndex + 1}/${chunks.size}):", 
-                modifier = Modifier.padding(bottom = 16.dp), 
+                text = "Найдите пары (${currentChunkIndex + 1}/${chunks.size}):",
+                modifier = Modifier.padding(bottom = 16.dp),
                 style = MaterialTheme.typography.titleLarge
             )
 
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                // Левая колонка
                 Column(modifier = Modifier.weight(1f)) {
                     leftItems.forEach { item ->
                         val text = if (isReverseMode) item.card.back else item.card.front
                         val isMatched = matchedIds.contains(item.id)
                         val isError = errorLeftIds.contains(item.id)
                         val isSelected = selectedLeftId == item.id
-                        
                         val isDisabled = isMatched || isError
 
                         TileButton(text = text, isMatched = isMatched, isSelected = isSelected, isError = isError, isDisabled = isDisabled) {
                             if (!isDisabled) {
-                                // Если в момент клика уже идет проверка (оба выбраны), игнорируем клик
                                 if (selectedLeftId != null && selectedRightId != null) return@TileButton
-                                
-                                // Если мы кликнули на новую карточку, сразу назначаем её выбранной
                                 selectedLeftId = if (selectedLeftId == item.id) null else item.id
-                                
-                                // И только если мы ВЫБРАЛИ карточку (а не сняли выделение)
-                                // мы запускаем проверку
-                                if (selectedLeftId != null) {
-                                    checkMatch()
-                                }
+                                if (selectedLeftId != null) checkMatch()
                             }
                         }
                     }
                 }
                 Spacer(modifier = Modifier.width(16.dp))
-                // Правая колонка
                 Column(modifier = Modifier.weight(1f)) {
                     rightItems.forEach { item ->
                         val text = if (isReverseMode) item.card.front else item.card.back
                         val isMatched = matchedIds.contains(item.id)
                         val isError = errorRightIds.contains(item.id)
                         val isSelected = selectedRightId == item.id
-                        
                         val isDisabled = isMatched || isError
 
                         TileButton(text = text, isMatched = isMatched, isSelected = isSelected, isError = isError, isDisabled = isDisabled) {
                             if (!isDisabled) {
-                                // Если в момент клика уже идет проверка (оба выбраны), игнорируем клик
                                 if (selectedLeftId != null && selectedRightId != null) return@TileButton
-                                
                                 selectedRightId = if (selectedRightId == item.id) null else item.id
-                                
-                                if (selectedRightId != null) {
-                                    checkMatch()
-                                }
+                                if (selectedRightId != null) checkMatch()
                             }
                         }
                     }
                 }
             }
         } else {
-            // Результаты (такие же, как в свайпах)
             val correctCount = currentCards.count { it.isKnown == true }
             val wrongCount = currentCards.count { it.isKnown == false }
-            
+
             Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 Text(text = "Тренировка завершена!", style = MaterialTheme.typography.headlineMedium)
                 Text(text = "Знаю: $correctCount | Не знаю: $wrongCount", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(vertical = 16.dp))
                 if (wrongCount > 0) {
                     Button(
                         onClick = {
-                            currentCards = currentCards
-                                .filter { it.isKnown == false }
-                                .onEach { it.isKnown = null }
-                                .shuffled()
+                            currentCards = currentCards.filter { it.isKnown == false }.onEach { it.isKnown = null }.shuffled()
                             session.cards = currentCards
                             session.currentPosition = 0
-                            onProgressChanged()
+                            onProgressChanged(null)
                             currentChunkIndex = 0
                             roundId++
                         },
@@ -957,18 +1094,14 @@ private data class TileItem(val id: Int, val card: Flashcard)
 @Composable
 fun TileButton(text: String, isMatched: Boolean, isSelected: Boolean, isError: Boolean, isDisabled: Boolean, onClick: () -> Unit) {
     val backgroundColor = when {
-        isError -> Color(0xFFE57373)   // Красный для ошибок
-        isMatched -> Color(0xFF81C784) // Зеленый для правильных пар
-        isSelected -> MaterialTheme.colorScheme.primaryContainer // Выделено (синий)
-        else -> MaterialTheme.colorScheme.surfaceVariant // Обычный цвет
+        isError -> Color(0xFFE57373)
+        isMatched -> Color(0xFF81C784)
+        isSelected -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant
     }
 
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp)
-            .height(80.dp)
-            .clickable(enabled = !isDisabled, onClick = onClick), // Отключаем клик, если isDisabled = true
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).height(80.dp).clickable(enabled = !isDisabled, onClick = onClick),
         colors = CardDefaults.cardColors(containerColor = backgroundColor),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
@@ -978,34 +1111,23 @@ fun TileButton(text: String, isMatched: Boolean, isSelected: Boolean, isError: B
     }
 }
 
-// Функция для парсинга CSV файла из папки assets
 fun loadFlashcardsFromCsv(context: Context, filename: String): List<Flashcard> {
     val flashcards = mutableListOf<Flashcard>()
     try {
-        // Открываем файл из папки assets
         val inputStream = context.assets.open(filename)
         val reader = BufferedReader(InputStreamReader(inputStream))
-        
-        // Читаем первую строку (заголовки) и пропускаем её
         reader.readLine()
-        
-        // Читаем остальные строки
         var line: String? = reader.readLine()
         while (line != null) {
-            // Разбиваем строку по запятой
             val parts = line.split(",")
-            // Убеждаемся, что у нас есть и слово, и перевод
             if (parts.size >= 2) {
-                val front = parts[0].trim()
-                val back = parts[1].trim()
-                flashcards.add(Flashcard(front = front, back = back))
+                flashcards.add(Flashcard(front = parts[0].trim(), back = parts[1].trim()))
             }
             line = reader.readLine()
         }
         reader.close()
     } catch (e: Exception) {
         e.printStackTrace()
-        // В случае ошибки вернем карточку с сообщением об ошибке
         flashcards.add(Flashcard("Error", "Ошибка чтения файла $filename"))
     }
     return flashcards
@@ -1014,18 +1136,15 @@ fun loadFlashcardsFromCsv(context: Context, filename: String): List<Flashcard> {
 fun loadFlashcardsFromUri(context: Context, uri: Uri): List<Flashcard> {
     val flashcards = mutableListOf<Flashcard>()
     try {
-        // ContentResolver нужен для чтения файлов по Uri в Android
         val inputStream = context.contentResolver.openInputStream(uri)
         if (inputStream != null) {
             val reader = BufferedReader(InputStreamReader(inputStream))
-            reader.readLine() // пропускаем заголовки
+            reader.readLine()
             var line: String? = reader.readLine()
             while (line != null) {
                 val parts = line.split(",")
                 if (parts.size >= 2) {
-                    val front = parts[0].trim()
-                    val back = parts[1].trim()
-                    flashcards.add(Flashcard(front = front, back = back))
+                    flashcards.add(Flashcard(front = parts[0].trim(), back = parts[1].trim()))
                 }
                 line = reader.readLine()
             }
@@ -1037,7 +1156,36 @@ fun loadFlashcardsFromUri(context: Context, uri: Uri): List<Flashcard> {
     return flashcards
 }
 
-// Функция для получения реального имени файла из Uri
+fun parseFlashcardsFromCsv(bytes: ByteArray): List<Flashcard> {
+    return bytes.toString(Charsets.UTF_8).lineSequence().drop(1).mapNotNull { line ->
+        val parts = line.split(",")
+        if (parts.size >= 2) Flashcard(parts[0].trim(), parts[1].trim()) else null
+    }.toList()
+}
+
+fun downloadSharedDecks(context: Context, blocks: MutableList<FlashcardBlock>) {
+    val nickname = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
+        .getString(NICKNAME_KEY, null) ?: return
+    FirebaseStorage.getInstance().reference.child("decks/$nickname").listAll()
+        .addOnSuccessListener { result ->
+            if (result.items.isEmpty()) return@addOnSuccessListener
+            var remaining = result.items.size
+            result.items.forEach { file ->
+                file.getBytes(10L * 1024L * 1024L).addOnSuccessListener { bytes ->
+                    val cards = parseFlashcardsFromCsv(bytes)
+                    if (cards.isNotEmpty()) blocks.add(FlashcardBlock(file.name.removeSuffix(".csv"), cards))
+                    file.delete().addOnCompleteListener {
+                        remaining--
+                        if (remaining == 0) saveBlocksToStorage(context, blocks)
+                    }
+                }.addOnFailureListener {
+                    remaining--
+                    if (remaining == 0) saveBlocksToStorage(context, blocks)
+                }
+            }
+        }
+}
+
 fun getFileName(context: Context, uri: Uri): String {
     var result: String? = null
     if (uri.scheme == "content") {
@@ -1056,14 +1204,11 @@ fun getFileName(context: Context, uri: Uri): String {
         val cut = result?.lastIndexOf('/') ?: -1
         if (cut != -1) result = result?.substring(cut + 1)
     }
-    // Возвращаем реальное имя файла с расширением (если оно есть)
     return result ?: "unknown_file"
 }
 
-// Режимы обучения
 enum class StudyMode { SWIPE, TILES }
 
-// Данные для текущей сессии изучения
 data class StudySession(
     val title: String,
     var cards: List<Flashcard>,
@@ -1084,13 +1229,9 @@ data class StudySession(
     }
 }
 
-// --- ФУНКЦИИ ДЛЯ ЛОКАЛЬНОГО СОХРАНЕНИЯ ПРОГРЕССА ---
-
 fun saveBlocksToStorage(context: Context, blocks: List<FlashcardBlock>) {
     try {
-        // Создаем файл во внутренней памяти приложения
         val file = File(context.filesDir, "flashcards_data.dat")
-        // Записываем список как объект
         ObjectOutputStream(file.outputStream()).use { it.writeObject(blocks.toList()) }
     } catch (e: Exception) {
         e.printStackTrace()
@@ -1102,7 +1243,6 @@ fun loadBlocksFromStorage(context: Context): List<FlashcardBlock>? {
     return try {
         val file = File(context.filesDir, "flashcards_data.dat")
         if (file.exists()) {
-            // Читаем объект из файла
             ObjectInputStream(file.inputStream()).use { it.readObject() as? List<FlashcardBlock> }
         } else null
     } catch (e: Exception) {
