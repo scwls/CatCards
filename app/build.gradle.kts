@@ -57,4 +57,8 @@ dependencies {
     // Подключаем нужные нам модули (версии указывать не нужно, BoM сделает это сам)
     implementation("com.google.firebase:firebase-database") // Для синхронизации счетчика
     implementation("com.google.firebase:firebase-storage")  // Для скачивания CSV колод
+    
+    // Для фоновых задач (проверка уведомлений, когда приложение закрыто)
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 }
