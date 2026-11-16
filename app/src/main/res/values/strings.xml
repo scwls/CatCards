@@ -1,3 +1,4 @@
 <resources>
-    <string name="app_name">My Application</string>
+    <string name="app_name">CatCards</string>
+    <string name="admin_notification_channel">admin_msg_v2</string>
 </resources>

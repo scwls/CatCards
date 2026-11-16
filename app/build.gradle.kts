@@ -40,6 +40,7 @@ dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
+    implementation("androidx.compose.material:material-icons-extended")
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
@@ -56,9 +57,10 @@ dependencies {
 
     // Подключаем нужные нам модули (версии указывать не нужно, BoM сделает это сам)
     implementation("com.google.firebase:firebase-database") // Для синхронизации счетчика
+    // Явная версия нужна Android Studio для корректной индексации FirebaseAuth.
+    implementation("com.google.firebase:firebase-auth:23.0.0") // Регистрация и вход пользователей
+    implementation("com.google.firebase:firebase-functions") // Проверка email-кодов через Cloud Functions
     implementation("com.google.firebase:firebase-storage")  // Для скачивания CSV колод
+    implementation("com.google.firebase:firebase-messaging:24.0.0") // Push-уведомления через FCM
     
-    // Для фоновых задач (проверка уведомлений, когда приложение закрыто)
-    implementation("androidx.work:work-runtime-ktx:2.9.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 }

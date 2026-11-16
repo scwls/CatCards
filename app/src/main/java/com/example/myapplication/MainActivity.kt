@@ -11,6 +11,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.mutableStateListOf
@@ -20,13 +21,25 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.ObjectInputStream
 import java.io.ObjectOutputStream
+import java.io.InputStream
+import java.io.OutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.imePadding
+import android.content.res.Configuration
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.material3.Scaffold
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
@@ -43,9 +56,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.lerp
@@ -53,6 +79,12 @@ import kotlin.math.abs
 import kotlin.math.min
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.background
@@ -60,6 +92,8 @@ import kotlinx.coroutines.delay
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.runtime.rememberCoroutineScope
@@ -69,8 +103,20 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Switch
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -78,16 +124,22 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.ui.window.Dialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import com.example.myapplication.ui.theme.MyApplicationTheme
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.graphics.Brush
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
@@ -99,19 +151,33 @@ import androidx.core.app.NotificationCompat
 import com.google.firebase.database.ChildEventListener
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
+import com.google.firebase.database.MutableData
+import com.google.firebase.database.Transaction
 import com.google.firebase.storage.FirebaseStorage
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.WorkManager
-import java.util.concurrent.TimeUnit
+import com.google.firebase.functions.FirebaseFunctions
+import com.google.firebase.messaging.FirebaseMessaging
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.AuthResult
+import java.nio.charset.StandardCharsets
+import android.util.Log
+import android.util.Patterns
+import androidx.compose.foundation.ScrollState
+import androidx.compose.material3.IconButton
+import com.google.android.gms.tasks.Task
+import com.google.firebase.database.DatabaseReference
+import java.io.Serializable
+import java.lang.IllegalStateException
 
 private const val STUDY_PREFS = "study_preferences"
 private const val LAST_STUDY_DATE = "last_study_date"
 private const val NICKNAME_PREFS = "user_preferences"
 private const val NICKNAME_KEY = "nickname"
 private const val FIREBASE_STORAGE_BUCKET = "gs://card-eng.firebasestorage.app"
+private const val ERROR_REPORT_MAX_BYTES = 5L * 1024L * 1024L
 
-data class UserActivity(val learned: Long, val wrong: Long)
+enum class MainTab { PROFILE, DECKS, SETTINGS, CHAT }
+
+data class UserActivity(val learned: Long, val wrong: Long, val avatar: String = "🐱")
 
 fun incrementWrongToday(context: Context) {
     val prefs = context.getSharedPreferences(STUDY_PREFS, Context.MODE_PRIVATE)
@@ -119,7 +185,11 @@ fun incrementWrongToday(context: Context) {
     val count = if (prefs.getString("wrong_date", "") == today) prefs.getInt("wrong_value", 0) + 1 else 1
     prefs.edit().putString("wrong_date", today).putInt("wrong_value", count).apply()
     context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE).getString(NICKNAME_KEY, null)?.let {
-        FirebaseDatabase.getInstance().getReference("users/$it/wrong_today").setValue(count)
+        val updates = mapOf<String, Any>(
+            "wrong_today" to count,
+            "last_active_date" to today
+        )
+        FirebaseDatabase.getInstance().getReference("users/$it").updateChildren(updates)
     }
 }
 
@@ -159,12 +229,16 @@ fun scheduleDailyAlarms(context: Context) {
     setAlarmForHour(20, 20)
 }
 
-fun showAdminMessageNotification(context: Context, message: String) {
+fun showAdminMessageNotification(
+    context: Context,
+    message: String,
+    title: String = "Сообщение от разработчика"
+) {
     val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         notificationManager.createNotificationChannel(
             NotificationChannel(
-                "admin_msg", 
+                "admin_msg_v2",
                 "Сообщения от разработчика", 
                 NotificationManager.IMPORTANCE_HIGH
             )
@@ -174,9 +248,9 @@ fun showAdminMessageNotification(context: Context, message: String) {
     val pendingIntent = PendingIntent.getActivity(
         context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
-    val notification = NotificationCompat.Builder(context, "admin_msg")
+    val notification = NotificationCompat.Builder(context, "admin_msg_v2")
         .setSmallIcon(R.drawable.ic_dialog_info)
-        .setContentTitle("Сообщение от разработчика")
+        .setContentTitle(title)
         .setContentText(message)
         .setContentIntent(pendingIntent)
         .setAutoCancel(true)
@@ -189,23 +263,28 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            getSystemService(NotificationManager::class.java).createNotificationChannel(
+                NotificationChannel(
+                    "admin_msg_v2",
+                    "Сообщения от разработчика",
+                    NotificationManager.IMPORTANCE_HIGH
+                )
+            )
+        }
+
         // Запускаем будильники при старте
         scheduleDailyAlarms(this)
         
-        // Регистрируем фоновую задачу для проверки уведомлений от разработчика
-        val workRequest = PeriodicWorkRequestBuilder<NotificationWorker>(
-            15, TimeUnit.MINUTES // Минимально разрешенный интервал в Android
-        ).build()
-        
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "NotificationWorker",
-            ExistingPeriodicWorkPolicy.KEEP,
-            workRequest
-        )
-
+        // Уведомления доставляются через Firebase Cloud Messaging.
         setContent {
-            var pinkTheme by rememberSaveable { mutableStateOf(false) }
             val context = LocalContext.current
+            
+            // Читаем сохраненную тему из настроек, чтобы передать ее в тему приложения
+            val prefs = context.getSharedPreferences(NICKNAME_PREFS, MODE_PRIVATE)
+            var pinkTheme by remember {
+                mutableStateOf(prefs.getBoolean("is_pink_theme", false))
+            }
 
             // Запрос разрешения на уведомления для Android 13+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -221,24 +300,69 @@ class MainActivity : ComponentActivity() {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
                         var hasNickname by remember {
-                            mutableStateOf(!context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
-                                .getString(NICKNAME_KEY, null).isNullOrBlank())
+                            mutableStateOf(FirebaseAuth.getInstance().currentUser != null ||
+                                !context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
+                                    .getString(NICKNAME_KEY, null).isNullOrBlank())
+                        }
+                        // Keep the system Back button from finishing the activity on screens
+                        // outside the study session, including registration.
+                        BackHandler(enabled = !hasNickname) {
+                            // Intentionally stay on the current screen.
                         }
                         if (!hasNickname) {
-                            RegistrationScreen(onRegistered = { name ->
-                                context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
-                                    .edit().putString(NICKNAME_KEY, name.trim()).apply()
-                                FirebaseDatabase.getInstance()
-                                    .getReference("users/${name.trim()}/learned_today")
-                                    .setValue(0L)
-                                hasNickname = true
-                            })
+                            AuthScreen(
+                                onAuthenticated = { uid, email, username, isSignUpAction ->
+                                    if (isSignUpAction) {
+                                        val shortId = String.format(Locale.US, "%04d", (0..9999).random())
+                                        // При регистрации сохраняем и username, и email, и сгенерированный ID
+                                        context.getSharedPreferences(NICKNAME_PREFS,
+                                            MODE_PRIVATE
+                                        )
+                                            .edit()
+                                            .putString(NICKNAME_KEY, username)
+                                            .putString("email", email)
+                                            .putString("short_id", shortId)
+                                            .apply()
+                                        
+                                        FirebaseDatabase.getInstance().getReference("users/$username").apply {
+                                            child("email").setValue(email)
+                                            child("learned_today").setValue(0L)
+                                            child("short_id").setValue(shortId)
+                                        }
+                                    } else {
+                                        // При входе берем никнейм из базы, так как мы его не знаем
+                                        FirebaseDatabase.getInstance().getReference("users").orderByChild("email").equalTo(email)
+                                            .addListenerForSingleValueEvent(object : ValueEventListener {
+                                                override fun onDataChange(snapshot: DataSnapshot) {
+                                                    val userNode = snapshot.children.firstOrNull()
+                                                    val foundUsername = userNode?.key
+                                                    val foundShortId = userNode?.child("short_id")?.getValue(String::class.java) ?: ""
+                                                    if (foundUsername != null) {
+                                                        context.getSharedPreferences(NICKNAME_PREFS,
+                                                            MODE_PRIVATE
+                                                        )
+                                                            .edit()
+                                                            .putString(NICKNAME_KEY, foundUsername)
+                                                            .putString("email", email)
+                                                            .putString("short_id", foundShortId)
+                                                            .apply()
+                                                    }
+                                                }
+                                                override fun onCancelled(error: DatabaseError) {}
+                                            })
+                                    }
+                                    hasNickname = true
+                                }
+                            )
                         } else {
-                            FlashcardApp(modifier = Modifier.fillMaxSize())
-                            BottomTools(
+                            // Передаем OnThemeChange в FlashcardApp, чтобы она могла поменять тему
+                            FlashcardApp(
                                 pinkTheme = pinkTheme,
-                                onThemeChange = { pinkTheme = it },
-                                modifier = Modifier.align(Alignment.BottomStart)
+                                onThemeChange = { 
+                                    pinkTheme = it 
+                                    prefs.edit().putBoolean("is_pink_theme", it).apply()
+                                },
+                                modifier = Modifier.fillMaxSize()
                             )
                         }
                     }
@@ -249,118 +373,1628 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun RegistrationScreen(onRegistered: (String) -> Unit) {
-    var nickname by remember { mutableStateOf("") }
+private fun AuthScreen(
+    onAuthenticated: (String, String, String, Boolean) -> Unit
+) {
+    val auth = remember { FirebaseAuth.getInstance() }
+    var isSignUp by remember { mutableStateOf(false) }
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") } // Новое поле для имени пользователя
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var showPassword by remember { mutableStateOf(false) }
+    var showResetDialog by remember { mutableStateOf(false) }
+    var resetMessage by remember { mutableStateOf<String?>(null) }
+    val hasEnoughLength = password.length >= 8
+    val hasUppercase = password.any { it.isUpperCase() }
+    val hasSpecialCharacter = password.any { !it.isLetterOrDigit() }
+    val passwordScore = listOf(hasEnoughLength, hasUppercase, hasSpecialCharacter).count { it }
+    val passwordProgress by animateFloatAsState(
+        targetValue = passwordScore / 3f,
+        animationSpec = tween(durationMillis = 300),
+        label = "password-strength"
+    )
+    val passwordColor by animateColorAsState(
+        targetValue = when (passwordScore) {
+            3 -> Color(0xFF2E7D32)
+            2 -> Color(0xFFF9A825)
+            else -> MaterialTheme.colorScheme.error
+        },
+        animationSpec = tween(durationMillis = 300),
+        label = "password-strength-color"
+    )
+    val passwordStatus = listOf(
+        hasEnoughLength to "Не менее 8 символов",
+        hasUppercase to "Заглавная буква",
+        hasSpecialCharacter to "Специальный знак"
+    )
+    var isWaitingForVerification by remember { mutableStateOf(false) }
+
+    // Автоматическая проверка статуса верификации, если мы ждем подтверждения
+    LaunchedEffect(isWaitingForVerification) {
+        if (isWaitingForVerification) {
+            while (true) {
+                delay(3000) // Проверяем каждые 3 секунды
+                val user = auth.currentUser
+                if (user != null) {
+                    user.reload().addOnSuccessListener {
+                        if (user.isEmailVerified) {
+                            isWaitingForVerification = false
+                            onAuthenticated(user.uid, user.email ?: "", username.trim(), isSignUp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center) {
-        Text("Регистрация", style = MaterialTheme.typography.headlineMedium)
-        OutlinedTextField(nickname, { nickname = it }, label = { Text("Имя") }, singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp))
-        Button(onClick = { if (nickname.isNotBlank()) onRegistered(nickname) }, modifier = Modifier.fillMaxWidth()) {
-            Text("Войти")
+        
+        Text(
+            "Добро пожаловать в CatCards! \uD83D\uDC31", 
+            style = MaterialTheme.typography.headlineMedium,
+            textAlign = TextAlign.Center,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+        
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+            SegmentedButton(
+                selected = !isSignUp,
+                onClick = { isSignUp = false; error = null },
+                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                modifier = Modifier.weight(1f)
+            ) { Text("Вход") }
+            SegmentedButton(
+                selected = isSignUp,
+                onClick = { isSignUp = true; error = null },
+                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                modifier = Modifier.weight(1f)
+            ) { Text("Регистрация") }
+        }
+
+        if (isSignUp) {
+            OutlinedTextField(
+                value = username,
+                onValueChange = { username = it },
+                label = { Text("Имя пользователя") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+            )
+        }
+        OutlinedTextField(email, { email = it }, label = { Text("Электронная почта") }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 16.dp))
+        OutlinedTextField(
+            value = password,
+            onValueChange = { password = it },
+            label = { Text("Пароль") },
+            singleLine = true,
+            visualTransformation = if (showPassword) androidx.compose.ui.text.input.VisualTransformation.None
+            else PasswordVisualTransformation(),
+            trailingIcon = {
+                IconButton(onClick = { showPassword = !showPassword }) {
+                    Icon(
+                        imageVector = if (showPassword) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                        contentDescription = if (showPassword) "Скрыть пароль" else "Показать пароль"
+                    )
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+        
+        if (isSignUp) {
+            Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 12.dp)) {
+                LinearProgressIndicator(
+                    progress = { passwordProgress },
+                    color = passwordColor,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth().height(6.dp)
+                )
+                Text(
+                    text = when (passwordScore) {
+                        3 -> "Надежность пароля: высокая"
+                        2 -> "Надежность пароля: средняя"
+                        1 -> "Надежность пароля: низкая"
+                        else -> "Надежность пароля: отсутствует"
+                    },
+                    color = passwordColor,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+                passwordStatus.forEach { (passed, requirement) ->
+                    Text(
+                        text = "${if (passed) "✓" else "○"} $requirement",
+                        color = if (passed) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        } else {
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+        
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(bottom = 8.dp)) }
+        Button(enabled = !busy, onClick = {
+            val normalizedEmail = email.trim()
+            val normalizedUsername = username.trim()
+            if (isSignUp && normalizedUsername.isBlank()) {
+                error = "Пожалуйста, введите имя пользователя"
+            } else if (!Patterns.EMAIL_ADDRESS.matcher(normalizedEmail).matches()) {
+                error = "Введите корректную электронную почту"
+            } else if (isSignUp && passwordScore < 3) {
+                error = "Пароль должен содержать 8 символов, заглавную букву и специальный знак"
+            } else {
+                busy = true
+                error = null
+                val task = if (isSignUp) auth.createUserWithEmailAndPassword(normalizedEmail, password)
+                else auth.signInWithEmailAndPassword(normalizedEmail, password)
+                
+                task.addOnSuccessListener { result ->
+                    val user = result.user
+                    if (user != null) {
+                        if (isSignUp) {
+                            user.sendEmailVerification()
+                            error = "Аккаунт создан! Мы отправили ссылку на $normalizedEmail. Приложение автоматически откроется после подтверждения."
+                            isWaitingForVerification = true // Запускаем цикл проверки
+                            // Убрали auth.signOut(), чтобы reload() работал и мы могли проверять статус
+                        } else {
+                            // Пытается войти
+                            if (user.isEmailVerified) {
+                                // Если это вход (не регистрация), передаем пустую строку, так как мы берем ник из БД
+                                onAuthenticated(user.uid, normalizedEmail, "", isSignUp)
+                            } else {
+                                user.sendEmailVerification() // На всякий случай отправляем еще раз
+                                error = "Email не подтвержден. Мы отправили ссылку на $normalizedEmail. Приложение автоматически откроется после подтверждения."
+                                isWaitingForVerification = true
+                            }
+                        }
+                    }
+                }.addOnFailureListener { exception ->
+                    error = when {
+                        exception.message?.contains("CONFIGURATION_NOT_FOUND", ignoreCase = true) == true -> 
+                            "Firebase Authentication не настроена. Включите Email/Password в Firebase Console."
+                        exception.message?.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true) == true ||
+                        exception.message?.contains("INVALID_PASSWORD", ignoreCase = true) == true ||
+                        exception.message?.contains("USER_NOT_FOUND", ignoreCase = true) == true ||
+                        exception.message?.contains("credential is incorrect", ignoreCase = true) == true -> 
+                            "Неверный email или пароль"
+                        exception.message?.contains("EMAIL_EXISTS", ignoreCase = true) == true ->
+                            "Пользователь с такой почтой уже существует"
+                        else -> 
+                            exception.message ?: "Не удалось выполнить операцию"
+                    }
+                }.addOnCompleteListener { busy = false }
+            }
+        }, modifier = Modifier.fillMaxWidth()) {
+            Text(if (busy) "Подождите…" else if (isSignUp) "Зарегистрироваться" else "Войти")
+        }
+        
+        if (!isSignUp) {
+            TextButton(onClick = { resetMessage = null; showResetDialog = true }) {
+                Text("Забыли пароль?")
+            }
+        }
+    }
+
+    if (showResetDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!busy) showResetDialog = false },
+            title = { Text("Восстановление пароля") },
+            text = {
+                Column {
+                    Text("Введите email. Мы отправим письмо со ссылкой для создания нового пароля.")
+                    OutlinedTextField(
+                        value = email,
+                        onValueChange = { email = it; resetMessage = null },
+                        label = { Text("Электронная почта") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+                    )
+                    resetMessage?.let { Text(it, modifier = Modifier.padding(top = 8.dp)) }
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = !busy, onClick = {
+                    val normalizedEmail = email.trim()
+                    if (!Patterns.EMAIL_ADDRESS.matcher(normalizedEmail).matches()) {
+                        resetMessage = "Введите корректную электронную почту"
+                    } else {
+                        busy = true
+                        auth.setLanguageCode("ru")
+                        auth.sendPasswordResetEmail(normalizedEmail)
+                            .addOnSuccessListener {
+                                resetMessage = "Письмо для восстановления отправлено"
+                            }
+                            .addOnFailureListener { exception ->
+                                resetMessage = exception.message ?: "Не удалось отправить письмо"
+                            }
+                            .addOnCompleteListener { busy = false }
+                    }
+                }) { Text("Отправить") }
+            },
+            dismissButton = {
+                TextButton(enabled = !busy, onClick = { showResetDialog = false }) { Text("Закрыть") }
+            }
+        )
+    }
+}
+
+@Composable
+fun GuestProfileScreen(
+    userNickname: String,
+    onBack: () -> Unit,
+    onMessageClick: () -> Unit
+) {
+    BackHandler(enabled = true) {
+        onBack()
+    }
+
+    var userDescription by remember { mutableStateOf("") }
+    var userAvatar by remember { mutableStateOf("🐱") }
+    var userShortId by remember { mutableStateOf("") }
+    var userLearned by remember { mutableStateOf(0L) }
+    var userWrong by remember { mutableStateOf(0L) }
+    var isLoading by remember { mutableStateOf(true) }
+    var showSendDeckDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(userNickname) {
+        val dbRef = FirebaseDatabase.getInstance().getReference("users/$userNickname")
+        dbRef.addListenerForSingleValueEvent(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                userDescription = snapshot.child("description").getValue(String::class.java) ?: "Пользователь пока ничего не рассказал о себе."
+                userAvatar = snapshot.child("avatar").getValue(String::class.java) ?: "🐱"
+                userShortId = snapshot.child("short_id").getValue(String::class.java) ?: ""
+                
+                val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                val lastActive = snapshot.child("last_active_date").getValue(String::class.java)
+                if (lastActive == today) {
+                    userLearned = (snapshot.child("learned_today").value as? Number)?.toLong() ?: 0L
+                    userWrong = (snapshot.child("wrong_today").value as? Number)?.toLong() ?: 0L
+                }
+                
+                isLoading = false
+            }
+            override fun onCancelled(error: DatabaseError) {
+                isLoading = false
+            }
+        })
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(16.dp).imePadding(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Text("←", fontSize = 24.sp)
+            }
+            Spacer(Modifier.width(8.dp))
+            Text("Профиль пользователя", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        }
+
+        if (isLoading) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        } else {
+            Spacer(modifier = Modifier.height(16.dp))
+            Box(
+                modifier = Modifier
+                    .size(100.dp)
+                    .background(MaterialTheme.colorScheme.primaryContainer, shape = CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(userAvatar, fontSize = 48.sp)
+            }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Text(
+                text = userNickname + if (userShortId.isNotBlank()) " #$userShortId" else "",
+                style = MaterialTheme.typography.titleLarge, 
+                fontWeight = FontWeight.Bold
+            )
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(userLearned.toString(), style = MaterialTheme.typography.headlineSmall, color = Color(0xFF2E7D32))
+                    Text("Изучено за сутки", style = MaterialTheme.typography.bodySmall)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(userWrong.toString(), style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.error)
+                    Text("Ошибок за сутки", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("О себе", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = userDescription,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.weight(1f))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onMessageClick,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Написать", maxLines = 1)
+                }
+                
+                OutlinedButton(
+                    onClick = { showSendDeckDialog = true },
+                    modifier = Modifier.weight(1.3f)
+                ) {
+                    Text("Отправить колоду", maxLines = 1, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+
+    if (showSendDeckDialog) {
+        val context = LocalContext.current
+        val myBlocks = remember { loadBlocksFromStorage(context) ?: emptyList() }
+        var isSending by remember { mutableStateOf(false) }
+        var sendStatusMessage by remember { mutableStateOf<String?>(null) }
+        
+        val csvPicker = rememberLauncherForActivityResult(
+            ActivityResultContracts.GetContent()
+        ) { uri: Uri? ->
+            if (uri != null) {
+                isSending = true
+                val name = getFileName(context, uri).removeSuffix(".csv")
+                val cards = loadFlashcardsFromUri(context, uri)
+                if (cards.isNotEmpty()) {
+                    sendDeckToUser(
+                        context = context,
+                        targetUserNickname = userNickname,
+                        deckName = name,
+                        cards = cards,
+                        onSuccess = {
+                            isSending = false
+                            Toast.makeText(context, "Колода «$name» отправлена $userNickname!", Toast.LENGTH_SHORT).show()
+                            showSendDeckDialog = false
+                        },
+                        onFailure = { err ->
+                            isSending = false
+                            sendStatusMessage = err
+                        }
+                    )
+                } else {
+                    isSending = false
+                    sendStatusMessage = "Не удалось прочитать карточки из файла"
+                }
+            }
+        }
+
+        Dialog(onDismissRequest = { if (!isSending) showSendDeckDialog = false }) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Отправить колоду", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Выберите колоду для $userNickname", style = MaterialTheme.typography.bodySmall, color = Color.Gray, modifier = Modifier.padding(bottom = 16.dp))
+                    
+                    if (isSending) {
+                        CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+                    } else {
+                        if (myBlocks.isEmpty()) {
+                            Text("У вас пока нет сохраненных колод", color = Color.Gray, modifier = Modifier.padding(vertical = 12.dp))
+                        } else {
+                            LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
+                                items(myBlocks) { block ->
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp)
+                                            .clickable {
+                                                isSending = true
+                                                sendDeckToUser(
+                                                    context = context,
+                                                    targetUserNickname = userNickname,
+                                                    deckName = block.name,
+                                                    cards = block.cards,
+                                                    onSuccess = {
+                                                        isSending = false
+                                                        Toast.makeText(context, "Колода «${block.name}» отправлена $userNickname!", Toast.LENGTH_SHORT).show()
+                                                        showSendDeckDialog = false
+                                                    },
+                                                    onFailure = { err ->
+                                                        isSending = false
+                                                        sendStatusMessage = err
+                                                    }
+                                                )
+                                            },
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(block.name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                            Text("${block.cards.size} шт.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        OutlinedButton(
+                            onClick = { csvPicker.launch("*/*") },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Из файла (.csv)")
+                        }
+                    }
+                    
+                    sendStatusMessage?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+                    }
+                    
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    TextButton(
+                        onClick = { showSendDeckDialog = false },
+                        enabled = !isSending,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Отмена")
+                    }
+                }
+            }
         }
     }
 }
 
-private const val DEVELOPER_PASSWORD = "504680"
-
 @Composable
-private fun BottomTools(
-    pinkTheme: Boolean,
-    onThemeChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var showToolsMenu by remember { mutableStateOf(false) }
-    var showDeveloperDialog by remember { mutableStateOf(false) }
+fun ProfileScreen() {
+    val context = LocalContext.current
+    val prefs = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
+    val nickname = prefs.getString(NICKNAME_KEY, "Пользователь") ?: "Пользователь"
+    val shortId = prefs.getString("short_id", "") ?: ""
+    
+    var profileToView by remember { mutableStateOf<String?>(null) }
+    var selectedChatUser by remember { mutableStateOf<String?>(null) }
 
-    Box(modifier = modifier.padding(start = 16.dp, bottom = 16.dp)) {
-        FloatingActionButton(
-            onClick = { showToolsMenu = true },
-            modifier = Modifier.height(48.dp),
-            elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp)
-        ) { Text("⚙", fontSize = 22.sp) }
+    if (profileToView != null) {
+        GuestProfileScreen(
+            userNickname = profileToView!!,
+            onBack = { profileToView = null },
+            onMessageClick = {
+                selectedChatUser = profileToView
+                profileToView = null
+            }
+        )
+    } else if (selectedChatUser != null) {
+        ChatDetailScreen(
+            recipient = selectedChatUser!!,
+            onBack = { selectedChatUser = null },
+            onViewProfile = { profileToView = selectedChatUser }
+        )
+    } else {
+        var description by remember { mutableStateOf(prefs.getString("user_description", "") ?: "") }
+    var isEditingDescription by remember { mutableStateOf(false) }
+    
+    var selectedAvatar by remember { mutableStateOf(prefs.getString("user_avatar", "🐱") ?: "🐱") }
+    var showAvatarDialog by remember { mutableStateOf(false) }
+    
+    val availableAvatars = listOf("🐱", "🐶", "🦊", "🐼", "🦁", "🐯", "🦉", "🐸", "🦄")
+    
+    val learnedToday = getLearnedToday(context)
+    val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+    val wrongToday = if (context.getSharedPreferences(STUDY_PREFS, Context.MODE_PRIVATE).getString("wrong_date", "") == today) {
+        context.getSharedPreferences(STUDY_PREFS, Context.MODE_PRIVATE).getInt("wrong_value", 0)
+    } else {
+        0
     }
 
-    if (showToolsMenu) {
-        AlertDialog(
-            onDismissRequest = { showToolsMenu = false },
-            title = { Text("Настройки") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Text("Тема", fontWeight = FontWeight.Bold)
-                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                        SegmentedButton(
-                            selected = !pinkTheme,
-                            onClick = { onThemeChange(false) },
-                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
-                        ) { Text("BLUE") }
-                        SegmentedButton(
-                            selected = pinkTheme,
-                            onClick = { onThemeChange(true) },
-                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
-                        ) { Text("ROSE") }
+    var showFriendsDialog by remember { mutableStateOf(false) }
+    var hasIncomingRequests by remember { mutableStateOf(false) }
+
+    LaunchedEffect(nickname) {
+        FirebaseDatabase.getInstance().getReference("friend_requests/$nickname")
+            .addValueEventListener(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    hasIncomingRequests = snapshot.childrenCount > 0
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            })
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(16.dp).imePadding(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Профиль", style = MaterialTheme.typography.headlineMedium)
+            Button(onClick = { showFriendsDialog = true }) {
+                Text("Друзья")
+                if (hasIncomingRequests) {
+                    Box(modifier = Modifier.padding(start = 8.dp).size(8.dp).background(Color.Red, CircleShape))
+                }
+            }
+        }
+        
+        Box(
+            modifier = Modifier
+                .size(100.dp)
+                .background(MaterialTheme.colorScheme.primaryContainer, shape = CircleShape)
+                .clickable { showAvatarDialog = true },
+            contentAlignment = Alignment.Center
+        ) {
+            Text(selectedAvatar, fontSize = 48.sp)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .background(MaterialTheme.colorScheme.primary, CircleShape)
+                    .padding(4.dp)
+            ) {
+                Icon(
+                    Icons.Filled.Edit,
+                    contentDescription = "Изменить аватар",
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        Text(
+            text = nickname + if (shortId.isNotBlank()) " #$shortId" else "",
+            style = MaterialTheme.typography.titleLarge, 
+            fontWeight = FontWeight.Bold
+        )
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(learnedToday.toString(), style = MaterialTheme.typography.headlineSmall, color = Color(0xFF2E7D32))
+                Text("Изучено за сутки", style = MaterialTheme.typography.bodySmall)
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(wrongToday.toString(), style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.error)
+                Text("Ошибок за сутки", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("О себе", fontWeight = FontWeight.Bold)
+                    IconButton(onClick = { 
+                        if (isEditingDescription) {
+                            prefs.edit().putString("user_description", description).apply()
+                            FirebaseDatabase.getInstance().getReference("users/$nickname/description").setValue(description)
+                        }
+                        isEditingDescription = !isEditingDescription 
+                    }) {
+                        Icon(
+                            if (isEditingDescription) Icons.Filled.Check else Icons.Filled.Edit,
+                            contentDescription = "Редактировать"
+                        )
                     }
-                    Button(
-                        onClick = {
-                            showToolsMenu = false
-                            showDeveloperDialog = true
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("Войти в режим разработчика") }
+                }
+                
+                if (isEditingDescription) {
+                    OutlinedTextField(
+                        value = description,
+                        onValueChange = { description = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Напишите что-нибудь о себе...") },
+                        maxLines = 5
+                    )
+                } else {
+                    Text(
+                        text = if (description.isNotBlank()) description else "Здесь пока ничего нет. Расскажите о себе!",
+                        color = if (description.isNotBlank()) MaterialTheme.colorScheme.onSurface else Color.Gray,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    )
+                }
+            }
+        }
+    }
+    
+    if (showAvatarDialog) {
+        AlertDialog(
+            onDismissRequest = { showAvatarDialog = false },
+            title = { Text("Выберите аватарку") },
+            text = {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    items(availableAvatars) { avatar ->
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .background(
+                                    if (avatar == selectedAvatar) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) 
+                                    else MaterialTheme.colorScheme.surfaceVariant,
+                                    CircleShape
+                                )
+                                .clickable {
+                                    selectedAvatar = avatar
+                                    prefs.edit().putString("user_avatar", avatar).apply()
+                                    FirebaseDatabase.getInstance().getReference("users/$nickname/avatar").setValue(avatar)
+                                    showAvatarDialog = false
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(avatar, fontSize = 32.sp)
+                        }
+                    }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showToolsMenu = false }) { Text("Готово") }
+                TextButton(onClick = { showAvatarDialog = false }) { Text("Закрыть") }
             }
         )
     }
+
+    if (showFriendsDialog) {
+        FriendsDialog(
+            currentNickname = nickname, 
+            onDismiss = { showFriendsDialog = false },
+            onFriendClick = { profileToView = it }
+        )
+    }
+}
+}
+
+@Composable
+fun FriendsDialog(
+    currentNickname: String,
+    onDismiss: () -> Unit,
+    onFriendClick: (String) -> Unit = {}
+) {
+    var currentTab by remember { mutableStateOf(0) } // 0 = Мои, 1 = Поиск, 2 = Запросы
+    var friendIdInput by remember { mutableStateOf("") }
+    var statusMessage by remember { mutableStateOf<String?>(null) }
+    
+    var incomingRequests by remember { mutableStateOf<List<String>>(emptyList()) }
+    var friendsList by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) } // nickname to avatar
+    
+    var searchResultNickname by remember { mutableStateOf<String?>(null) }
+    var searchResultAvatar by remember { mutableStateOf<String?>(null) }
+    var isSearching by remember { mutableStateOf(false) }
+
+    // Поиск по 4-значному ID
+    LaunchedEffect(friendIdInput) {
+        if (friendIdInput.length == 4) {
+            isSearching = true
+            statusMessage = null
+            searchResultNickname = null
+            searchResultAvatar = null
+            val db = FirebaseDatabase.getInstance()
+            db.getReference("users").orderByChild("short_id").equalTo(friendIdInput)
+                .addListenerForSingleValueEvent(object : ValueEventListener {
+                    override fun onDataChange(snapshot: DataSnapshot) {
+                        isSearching = false
+                        val targetNode = snapshot.children.firstOrNull()
+                        if (targetNode != null) {
+                            val targetNickname = targetNode.key ?: ""
+                            if (targetNickname.equals(currentNickname, ignoreCase = true)) {
+                                statusMessage = "Это ваш собственный ID"
+                            } else {
+                                searchResultNickname = targetNickname
+                                searchResultAvatar = targetNode.child("avatar").getValue(String::class.java) ?: "🐱"
+                            }
+                        } else {
+                            statusMessage = "Пользователь не найден"
+                        }
+                    }
+                    override fun onCancelled(error: DatabaseError) {
+                        isSearching = false
+                        statusMessage = "Ошибка: ${error.message}"
+                    }
+                })
+        } else {
+            searchResultNickname = null
+            searchResultAvatar = null
+        }
+    }
+    
+    // Загрузка входящих запросов и списка друзей
+    LaunchedEffect(currentNickname) {
+        val db = FirebaseDatabase.getInstance()
+        
+        // Входящие запросы
+        db.getReference("friend_requests/$currentNickname")
+            .addValueEventListener(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    incomingRequests = snapshot.children.mapNotNull { it.key }
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            })
+            
+        // Список друзей
+        db.getReference("friends/$currentNickname")
+            .addValueEventListener(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val friendIds = snapshot.children.mapNotNull { it.key }
+                    if (friendIds.isEmpty()) {
+                        friendsList = emptyList()
+                        return
+                    }
+                    db.getReference("users").addListenerForSingleValueEvent(object : ValueEventListener {
+                        override fun onDataChange(usersSnap: DataSnapshot) {
+                            friendsList = friendIds.mapNotNull { fId ->
+                                val avatar = usersSnap.child(fId).child("avatar").getValue(String::class.java) ?: "🐱"
+                                fId to avatar
+                            }
+                        }
+                        override fun onCancelled(error: DatabaseError) {}
+                    })
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            })
+    }
+    
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Друзья", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 16.dp))
+                
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                    SegmentedButton(
+                        selected = currentTab == 0,
+                        onClick = { currentTab = 0; statusMessage = null },
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3)
+                    ) { Text("Мои", fontSize = 12.sp) }
+                    SegmentedButton(
+                        selected = currentTab == 1,
+                        onClick = { currentTab = 1; statusMessage = null },
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3)
+                    ) { Text("Поиск", fontSize = 12.sp) }
+                    SegmentedButton(
+                        selected = currentTab == 2,
+                        onClick = { currentTab = 2; statusMessage = null },
+                        shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3)
+                    ) { Text("Запросы (${incomingRequests.size})", fontSize = 12.sp, maxLines = 1) }
+                }
+                
+                when (currentTab) {
+                    0 -> { // Мои друзья
+                        if (friendsList.isEmpty()) {
+                            Text(
+                                "У вас пока нет друзей", 
+                                color = Color.Gray, 
+                                modifier = Modifier.padding(vertical = 16.dp).align(Alignment.CenterHorizontally)
+                            )
+                        } else {
+                            LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
+                                items(friendsList) { (friendNick, avatar) ->
+                                    var showRemoveDialog by remember { mutableStateOf(false) }
+                                    
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.weight(1f).clickable {
+                                                onDismiss()
+                                                onFriendClick(friendNick)
+                                            },
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Box(
+                                                modifier = Modifier.size(40.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                                                contentAlignment = Alignment.Center
+                                            ) { Text(avatar, fontSize = 24.sp) }
+                                            Spacer(Modifier.width(12.dp))
+                                            Text(friendNick, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                        }
+                                        
+                                        IconButton(onClick = { showRemoveDialog = true }) {
+                                            Icon(Icons.Filled.Close, contentDescription = "Удалить", tint = MaterialTheme.colorScheme.error)
+                                        }
+                                    }
+                                    
+                                    if (showRemoveDialog) {
+                                        AlertDialog(
+                                            onDismissRequest = { showRemoveDialog = false },
+                                            title = { Text("Удалить из друзей?") },
+                                            text = { Text("Вы уверены, что хотите удалить $friendNick из списка друзей?") },
+                                            confirmButton = {
+                                                TextButton(onClick = {
+                                                    val db = FirebaseDatabase.getInstance()
+                                                    db.getReference("friends/$currentNickname/$friendNick").removeValue()
+                                                    db.getReference("friends/$friendNick/$currentNickname").removeValue()
+                                                    showRemoveDialog = false
+                                                }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+                                            },
+                                            dismissButton = {
+                                                TextButton(onClick = { showRemoveDialog = false }) { Text("Отмена") }
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    1 -> { // Поиск (Добавить)
+                        OutlinedTextField(
+                            value = friendIdInput,
+                            onValueChange = { newValue -> 
+                                if (newValue.all { it.isDigit() } && newValue.length <= 4) {
+                                    friendIdInput = newValue
+                                    if (newValue.length < 4) statusMessage = null
+                                }
+                            },
+                            label = { Text("ID друга (4 цифры)") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        if (isSearching) {
+                            CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+                        } else if (searchResultNickname != null) {
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        val target = searchResultNickname!!
+                                        FirebaseDatabase.getInstance().getReference("friend_requests/$target/$currentNickname").setValue(true)
+                                            .addOnSuccessListener {
+                                                statusMessage = "Запрос отправлен!"
+                                                friendIdInput = ""
+                                                searchResultNickname = null
+                                            }
+                                    },
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier.size(40.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) { Text(searchResultAvatar ?: "🐱", fontSize = 24.sp) }
+                                        Spacer(Modifier.width(12.dp))
+                                        Text(searchResultNickname!!, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                    }
+                                    Icon(Icons.Filled.PersonAdd, contentDescription = "Добавить", tint = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                        }
+                        
+                        statusMessage?.let {
+                            Text(it, color = if (it.contains("отправлен")) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp).align(Alignment.CenterHorizontally))
+                        }
+                    }
+                    2 -> { // Запросы
+                        if (incomingRequests.isEmpty()) {
+                            Text("Нет новых запросов", color = Color.Gray, modifier = Modifier.padding(vertical = 16.dp).align(Alignment.CenterHorizontally))
+                        } else {
+                            LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
+                                items(incomingRequests) { sender ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(sender, fontWeight = FontWeight.Bold)
+                                        Row {
+                                            IconButton(onClick = {
+                                                val db = FirebaseDatabase.getInstance()
+                                                db.getReference("friends/$currentNickname/$sender").setValue(true)
+                                                db.getReference("friends/$sender/$currentNickname").setValue(true)
+                                                db.getReference("friend_requests/$currentNickname/$sender").removeValue()
+                                            }) {
+                                                Icon(Icons.Filled.Check, contentDescription = "Принять", tint = Color(0xFF2E7D32))
+                                            }
+                                            IconButton(onClick = {
+                                                FirebaseDatabase.getInstance().getReference("friend_requests/$currentNickname/$sender").removeValue()
+                                            }) {
+                                                Icon(Icons.Filled.Close, contentDescription = "Отклонить", tint = MaterialTheme.colorScheme.error)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                    Text("Закрыть")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingsScreen(
+    pinkTheme: Boolean,
+    onThemeChange: (Boolean) -> Unit
+) {
+    var showDeveloperDialog by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var newNickname by remember { mutableStateOf("") }
+    var renameError by remember { mutableStateOf<String?>(null) }
+    var isRenaming by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    val prefs = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
+    // Используем состояние для мгновенного обновления UI после смены ника
+    var currentNickname by remember { mutableStateOf(prefs.getString(NICKNAME_KEY, "") ?: "") }
+        
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri != null) {
+            context.contentResolver.openOutputStream(uri)?.use { createBackup(context, it) }
+            Toast.makeText(context, "Резервная копия сохранена!", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            context.contentResolver.openInputStream(uri)?.use { restoreBackup(context, it) }
+            Toast.makeText(context, "Данные восстановлены! Пожалуйста, перезапустите приложение.", Toast.LENGTH_LONG).show()
+        }
+    }
+    
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Text("Настройки", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(bottom = 24.dp))
+        
+        val currentEmail = prefs.getString("email", "") ?: ""
+        if (currentEmail.isNotBlank()) {
+            Text(
+                text = "Email: $currentEmail",
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+        }
+        
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Ваш ник: ${if (currentNickname.isNotBlank()) currentNickname else "не указан"}",
+                fontWeight = FontWeight.Bold
+            )
+            TextButton(onClick = { 
+                newNickname = currentNickname
+                renameError = null
+                showRenameDialog = true 
+            }) {
+                Text("Изменить")
+            }
+        }
+        
+        Text("Тема", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+        
+        var localThemeState by remember(pinkTheme) { mutableStateOf(pinkTheme) }
+        
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+            SegmentedButton(
+                selected = !localThemeState,
+                onClick = { 
+                    localThemeState = false
+                    onThemeChange(false) 
+                },
+                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                modifier = Modifier.weight(1f)
+            ) { Text("BLUE") }
+            SegmentedButton(
+                selected = localThemeState,
+                onClick = { 
+                    localThemeState = true
+                    onThemeChange(true) 
+                },
+                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                modifier = Modifier.weight(1f)
+            ) { Text("ROSE") }
+        }
+        
+        Text("Резервное копирование", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+        Text("Сохраните ваши колоды и переписки в файл .zip. При сохранении вы можете выбрать Google Диск, чтобы файл сохранился в вашем облаке.", style = MaterialTheme.typography.bodySmall, color = Color.Gray, modifier = Modifier.padding(bottom = 8.dp))
+        Row(Modifier.fillMaxWidth().padding(bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { 
+                val date = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
+                exportLauncher.launch("catcards_backup_$date.zip") 
+            }, modifier = Modifier.weight(1f)) {
+                Text("Экспорт")
+            }
+            OutlinedButton(onClick = { importLauncher.launch("application/zip") }, modifier = Modifier.weight(1f)) {
+                Text("Импорт")
+            }
+        }
+        
+        Spacer(Modifier.weight(1f))
+        
+        Button(
+            onClick = { showDeveloperDialog = true },
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("Режим разработчика") }
+    }
+    
+    if (showRenameDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!isRenaming) showRenameDialog = false },
+            title = { Text("Сменить ник") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = newNickname,
+                        onValueChange = { newValue ->
+                            if (newValue.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it == '_' }) {
+                                newNickname = newValue
+                                renameError = null 
+                            }
+                        },
+                        label = { Text("Новый ник") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        "Используйте только латинские буквы, цифры и знак подчеркивания",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                    renameError?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = !isRenaming && newNickname.isNotBlank() && newNickname != currentNickname, onClick = {
+                    isRenaming = true
+                    val db = FirebaseDatabase.getInstance()
+                    
+                    // 1. Проверяем, свободен ли новый ник
+                    db.getReference("users/$newNickname").addListenerForSingleValueEvent(object : ValueEventListener {
+                        override fun onDataChange(snapshot: DataSnapshot) {
+                            if (snapshot.exists()) {
+                                renameError = "Этот ник уже занят!"
+                                isRenaming = false
+                            } else {
+                                // 2. Копируем все данные со старого узла на новый
+                                db.getReference("users/$currentNickname").addListenerForSingleValueEvent(object : ValueEventListener {
+                                    override fun onDataChange(oldDataSnapshot: DataSnapshot) {
+                                        val data = oldDataSnapshot.value
+                                        
+                                        // 3. Записываем в новый узел и удаляем старый
+                                        db.getReference("users/$newNickname").setValue(data).addOnCompleteListener { task ->
+                                            if (task.isSuccessful) {
+                                                db.getReference("users/$currentNickname").removeValue()
+                                                
+                                                // Обновляем локальные настройки
+                                                prefs.edit().putString(NICKNAME_KEY, newNickname).apply()
+                                                currentNickname = newNickname
+                                                showRenameDialog = false
+                                                isRenaming = false
+                                                Toast.makeText(context, "Ник успешно изменен", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                renameError = "Не удалось сохранить новый ник"
+                                                isRenaming = false
+                                            }
+                                        }
+                                    }
+                                    override fun onCancelled(error: DatabaseError) {
+                                        renameError = "Ошибка базы данных: ${error.message}"
+                                        isRenaming = false
+                                    }
+                                })
+                            }
+                        }
+                        override fun onCancelled(error: DatabaseError) {
+                            renameError = "Ошибка базы данных: ${error.message}"
+                            isRenaming = false
+                        }
+                    })
+                }) { Text(if (isRenaming) "Сохранение..." else "Сохранить") }
+            },
+            dismissButton = {
+                TextButton(enabled = !isRenaming, onClick = { showRenameDialog = false }) { Text("Отмена") }
+            }
+        )
+    }
+    
     if (showDeveloperDialog) DeveloperDialog(onDismiss = { showDeveloperDialog = false })
+}
+
+data class ChatMessage(val text: String, val isFromMe: Boolean, val timestamp: Long = System.currentTimeMillis()) : Serializable
+
+fun saveChatHistory(context: Context, partner: String, messages: List<ChatMessage>) {
+    try {
+        val file = File(context.filesDir, "chat_${partner}.dat")
+        ObjectOutputStream(file.outputStream()).use { it.writeObject(messages.toList()) }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+@Suppress("UNCHECKED_CAST")
+fun loadChatHistory(context: Context, partner: String): List<ChatMessage> {
+    return try {
+        val file = File(context.filesDir, "chat_${partner}.dat")
+        if (file.exists()) {
+            ObjectInputStream(file.inputStream()).use { it.readObject() as? List<ChatMessage> } ?: emptyList()
+        } else {
+            emptyList()
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        emptyList()
+    }
+}
+
+@Composable
+fun ChatDetailScreen(
+    recipient: String,
+    onBack: () -> Unit,
+    onViewProfile: () -> Unit
+) {
+    BackHandler(enabled = true) {
+        onBack()
+    }
+
+    var messageText by remember { mutableStateOf("") }
+    val messages = remember { mutableStateListOf<ChatMessage>() }
+    val context = LocalContext.current
+    val currentNickname = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
+        .getString(NICKNAME_KEY, null)
+        
+    var recipientAvatar by remember { mutableStateOf("🐱") }
+
+    LaunchedEffect(recipient) {
+        FirebaseDatabase.getInstance().getReference("users/$recipient/avatar")
+            .addListenerForSingleValueEvent(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    recipientAvatar = snapshot.getValue(String::class.java) ?: "🐱"
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            })
+    }
+
+    // Загрузка локальной истории и прослушивание новых входящих сообщений
+    DisposableEffect(recipient, currentNickname) {
+        messages.clear()
+        messages.addAll(loadChatHistory(context, recipient))
+        
+        var listener: ChildEventListener? = null
+        var inboxRef: DatabaseReference? = null
+        
+        if (currentNickname != null) {
+            inboxRef = FirebaseDatabase.getInstance().getReference("chat_inbox/$currentNickname/$recipient")
+            listener = object : ChildEventListener {
+                override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
+                    val text = snapshot.child("text").getValue(String::class.java)
+                    if (text != null) {
+                        messages.add(ChatMessage(text, isFromMe = false))
+                        saveChatHistory(context, recipient, messages)
+                        snapshot.ref.removeValue() // Удаляем из облака после получения
+                    }
+                }
+                override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {}
+                override fun onChildRemoved(snapshot: DataSnapshot) {}
+                override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {}
+                override fun onCancelled(error: DatabaseError) {}
+            }
+            inboxRef.addChildEventListener(listener)
+        }
+        
+        onDispose {
+            if (inboxRef != null && listener != null) {
+                inboxRef.removeEventListener(listener)
+            }
+        }
+    }
+
+    Column(Modifier.fillMaxSize().imePadding()) {
+        Row(
+            Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Text("←", fontSize = 24.sp)
+            }
+            Spacer(Modifier.width(8.dp))
+            Row(
+                modifier = Modifier.weight(1f).clickable { onViewProfile() },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(recipientAvatar, fontSize = 24.sp)
+                }
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    recipient, 
+                    style = MaterialTheme.typography.titleLarge, 
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+        
+        LazyColumn(
+            Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
+            reverseLayout = true
+        ) {
+            items(messages.reversed()) { msg ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    horizontalArrangement = if (msg.isFromMe) Arrangement.End else Arrangement.Start,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    if (!msg.isFromMe) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
+                                .clickable { onViewProfile() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(recipientAvatar, fontSize = 18.sp)
+                        }
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (msg.isFromMe) MaterialTheme.colorScheme.primaryContainer 
+                                             else MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(msg.text, modifier = Modifier.padding(12.dp))
+                    }
+                }
+            }
+        }
+        
+        Column(
+            Modifier.fillMaxWidth().padding(16.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = messageText,
+                    onValueChange = { 
+                        if (it.length <= 500) {
+                            messageText = it 
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Сообщение...") },
+                    maxLines = 4,
+                    supportingText = {
+                        Text(
+                            text = "${messageText.length}/500",
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    onClick = {
+                        if (messageText.isNotBlank() && currentNickname != null) {
+                            // 1. Сохраняем локально у себя
+                            messages.add(ChatMessage(messageText, isFromMe = true))
+                            saveChatHistory(context, recipient, messages)
+                            
+                            // 2. Отправляем собеседнику в его облачный "почтовый ящик"
+                            val newMessage = mapOf(
+                                "text" to messageText,
+                                "timestamp" to System.currentTimeMillis()
+                            )
+                            FirebaseDatabase.getInstance().getReference("chat_inbox/$recipient/$currentNickname")
+                                .push().setValue(newMessage)
+                                
+                            // Также отправляем как уведомление (существующая логика)
+                            FirebaseDatabase.getInstance().getReference("notificationRequests/$recipient")
+                                .push().setValue(messageText)
+                                
+                            messageText = ""
+                        }
+                    },
+                    modifier = Modifier.padding(bottom = 20.dp) // Выравнивание кнопки из-за supportingText
+                ) {
+                    Text("Отправить")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ChatScreen() {
+    var users by remember { mutableStateOf<Map<String, UserActivity>>(emptyMap()) }
+    var usersError by remember { mutableStateOf<String?>(null) }
+    var selectedChatUser by remember { mutableStateOf<String?>(null) }
+    var profileToView by remember { mutableStateOf<String?>(null) }
+    
+    BackHandler(enabled = profileToView != null) {
+        profileToView = null
+    }
+
+    BackHandler(enabled = profileToView == null && selectedChatUser != null) {
+        selectedChatUser = null
+    }
+    
+    val context = LocalContext.current
+    val currentNickname = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
+        .getString(NICKNAME_KEY, null)
+        
+    LaunchedEffect(currentNickname) {
+        if (currentNickname == null) return@LaunchedEffect
+        usersError = null
+        val db = FirebaseDatabase.getInstance()
+        
+        // Сначала получаем список друзей
+        db.getReference("friends/$currentNickname").addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(friendsSnapshot: DataSnapshot) {
+                val friendIds = friendsSnapshot.children.mapNotNull { it.key }
+                if (friendIds.isEmpty()) {
+                    users = emptyMap()
+                    return
+                }
+                
+                // Затем загружаем информацию только о друзьях
+                db.getReference("users").addListenerForSingleValueEvent(object : ValueEventListener {
+                    override fun onDataChange(usersSnapshot: DataSnapshot) {
+                        val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                        val loadedUsers = mutableMapOf<String, UserActivity>()
+                        for (friendId in friendIds) {
+                            val userSnap = usersSnapshot.child(friendId)
+                            if (userSnap.exists()) {
+                                val lastActive = userSnap.child("last_active_date").value as? String
+                                val isToday = lastActive == today
+                                val avatar = userSnap.child("avatar").getValue(String::class.java) ?: "🐱"
+                                loadedUsers[friendId] = UserActivity(
+                                    if (isToday) (userSnap.child("learned_today").value as? Number)?.toLong().orZero() else 0L,
+                                    if (isToday) (userSnap.child("wrong_today").value as? Number)?.toLong().orZero() else 0L,
+                                    avatar
+                                )
+                            }
+                        }
+                        users = loadedUsers
+                    }
+
+                    override fun onCancelled(error: DatabaseError) {
+                        usersError = error.message
+                    }
+                })
+            }
+            override fun onCancelled(error: DatabaseError) {
+                usersError = error.message
+            }
+        })
+    }
+
+    if (profileToView != null) {
+        GuestProfileScreen(
+            userNickname = profileToView!!,
+            onBack = { profileToView = null },
+            onMessageClick = {
+                selectedChatUser = profileToView
+                profileToView = null
+            }
+        )
+    } else if (selectedChatUser != null) {
+        ChatDetailScreen(
+            recipient = selectedChatUser!!,
+            onBack = { selectedChatUser = null },
+            onViewProfile = { profileToView = selectedChatUser }
+        )
+    } else {
+        Column(Modifier.fillMaxSize().padding(16.dp)) {
+            Text("Чат", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(bottom = 16.dp))
+            
+            usersError?.let {
+                Text(
+                    text = it,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+            }
+            
+            
+            if (users.isEmpty()) {
+                Text(
+                    "У вас пока нет друзей в чате. Отправьте запрос из своего профиля, чтобы начать общаться!",
+                    color = Color.Gray,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(32.dp)
+                )
+            } else {
+                LazyColumn(modifier = Modifier.weight(1f)) {
+                    items(users.toList()) { (user, activity) ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clickable { selectedChatUser = user },
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(activity.avatar, fontSize = 24.sp)
+                                    }
+                                    Spacer(Modifier.width(12.dp))
+                                    Text(user, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                }
+                                
+                                IconButton(onClick = { selectedChatUser = user }) {
+                                    Text("💬", fontSize = 18.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
 private fun DeveloperDialog(onDismiss: () -> Unit) {
-    var password by remember { mutableStateOf("") }
-    var authorized by remember { mutableStateOf(false) }
     var users by remember { mutableStateOf<Map<String, UserActivity>>(emptyMap()) }
     var selectedUser by remember { mutableStateOf<String?>(null) }
     var userToDelete by remember { mutableStateOf<String?>(null) }
-    var userToMessage by remember { mutableStateOf<String?>(null) }
-    var messageText by remember { mutableStateOf("") }
+    var deletingUser by remember { mutableStateOf<String?>(null) }
     var uploadMessage by remember { mutableStateOf<String?>(null) }
     var usersError by remember { mutableStateOf<String?>(null) }
+    var errorReports by remember { mutableStateOf<List<String>>(emptyList()) }
+    var errorReportsMessage by remember { mutableStateOf<String?>(null) }
+    var reportToSave by remember { mutableStateOf<Pair<String, ByteArray>?>(null) }
     val context = LocalContext.current
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+    val currentNickname = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
+        .getString(NICKNAME_KEY, null)
+    val saveReportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        val report = reportToSave
+        reportToSave = null
+        if (uri != null && report != null) {
+            runCatching {
+                context.contentResolver.openOutputStream(uri)?.use { it.write(report.second) }
+            }.onFailure { errorReportsMessage = "Не удалось сохранить файл: ${it.message}" }
+        }
+    }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris: List<Uri> ->
         val user = selectedUser ?: return@rememberLauncherForActivityResult
-        if (uri != null && getFileName(context, uri).endsWith(".csv", true)) {
+        val csvUris = uris.filter { getFileName(context, it).endsWith(".csv", true) }
+        if (csvUris.isEmpty()) {
+            uploadMessage = "Выберите хотя бы одну CSV-колоду"
+            return@rememberLauncherForActivityResult
+        }
+        var completed = 0
+        var uploaded = 0
+        csvUris.forEach { uri ->
             val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
             if (bytes == null) {
-                uploadMessage = "Не удалось прочитать выбранный файл"
-                return@rememberLauncherForActivityResult
+                completed++
+                uploadMessage = "Не удалось прочитать одну из выбранных колод"
+                return@forEach
             }
             FirebaseStorage.getInstance(FIREBASE_STORAGE_BUCKET)
                     .reference
                     .child("decks/$user/${getFileName(context, uri)}")
                     .putBytes(bytes)
                     .addOnSuccessListener {
-                        uploadMessage = "Колода отправлена пользователю $user"
+                        uploaded++
+                        FirebaseDatabase.getInstance()
+                            .getReference("users/$user/available_decks_count")
+                            .runTransaction(object : Transaction.Handler {
+                                override fun doTransaction(currentData: MutableData): Transaction.Result {
+                                    val count = currentData.getValue(Long::class.java) ?: 0L
+                                    currentData.value = count + 1L
+                                    return Transaction.success(currentData)
+                                }
+
+                                override fun onComplete(
+                                    error: DatabaseError?,
+                                    committed: Boolean,
+                                    currentData: DataSnapshot?
+                                ) = Unit
+                            })
                     }
                     .addOnFailureListener { error ->
                         uploadMessage = "Ошибка отправки: ${error.message ?: error.javaClass.simpleName}"
+                    }
+                    .addOnCompleteListener {
+                        completed++
+                        if (completed == csvUris.size) {
+                            if (uploaded > 0) {
+                                FirebaseDatabase.getInstance()
+                                    .getReference("notificationRequests/$user")
+                                    .push()
+                                    .setValue("Разработчик отправил вам $uploaded ${if (uploaded == 1) "новую колоду" else "новые колоды"}. Откройте «Из облака», чтобы скачать их.")
+                            }
+                            uploadMessage = "Отправлено колод: $uploaded из ${csvUris.size}"
+                        }
                     }
         }
     }
     val loadUsers = {
         usersError = null
-        // Используем addValueEventListener вместо get() для получения обновлений в реальном времени
+        // Экран разработчика запрашивает актуальный список только при открытии.
         FirebaseDatabase.getInstance().getReference("users")
-            .addValueEventListener(object : ValueEventListener {
+            .addListenerForSingleValueEvent(object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
-                    users = snapshot.children.associate {
-                        it.key.orEmpty() to UserActivity(
-                            (it.child("learned_today").value as? Number)?.toLong().orZero(),
-                            (it.child("wrong_today").value as? Number)?.toLong().orZero()
-                        )
-                    }
+                    val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                    users = snapshot.children
+                        .filter { it.key != currentNickname }
+                        .associate {
+                            val lastActive = it.child("last_active_date").value as? String
+                            val isToday = lastActive == today
+                            val avatar = it.child("avatar").getValue(String::class.java) ?: "🐱"
+                            it.key.orEmpty() to UserActivity(
+                                if (isToday) (it.child("learned_today").value as? Number)?.toLong().orZero() else 0L,
+                                if (isToday) (it.child("wrong_today").value as? Number)?.toLong().orZero() else 0L,
+                                avatar
+                            )
+                        }
                 }
 
                 override fun onCancelled(error: DatabaseError) {
@@ -369,9 +2003,24 @@ private fun DeveloperDialog(onDismiss: () -> Unit) {
             })
     }
 
-    LaunchedEffect(authorized) {
-        if (authorized) {
-            loadUsers()
+    LaunchedEffect(Unit) {
+        loadUsers()
+    }
+
+    LaunchedEffect(selectedUser) {
+        errorReports = emptyList()
+        errorReportsMessage = null
+        val user = selectedUser
+        if (!user.isNullOrBlank()) {
+            FirebaseStorage.getInstance(FIREBASE_STORAGE_BUCKET)
+                .reference.child("error_reports/$user")
+                .listAll()
+                .addOnSuccessListener { result ->
+                    errorReports = result.items.map { it.name }.sortedDescending()
+                }
+                .addOnFailureListener { error ->
+                    errorReportsMessage = "Не удалось загрузить список ошибок: ${error.message}"
+                }
         }
     }
     
@@ -384,12 +2033,19 @@ private fun DeveloperDialog(onDismiss: () -> Unit) {
             confirmButton = {
                 TextButton(onClick = {
                     val user = userToDelete!!
-                    // Удаляем из Realtime Database
+                    deletingUser = user
                     FirebaseDatabase.getInstance().getReference("users/$user").removeValue()
                         .addOnSuccessListener {
+                            users = users - user
                             userToDelete = null
                         }
-                }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+                        .addOnFailureListener { error ->
+                            usersError = "Не удалось удалить пользователя: ${error.message ?: "ошибка Firebase"}"
+                        }
+                        .addOnCompleteListener { deletingUser = null }
+                }, enabled = deletingUser == null) {
+                    Text("Удалить", color = MaterialTheme.colorScheme.error)
+                }
             },
             dismissButton = {
                 TextButton(onClick = { userToDelete = null }) { Text("Отмена") }
@@ -397,40 +2053,11 @@ private fun DeveloperDialog(onDismiss: () -> Unit) {
         )
     }
 
-    // Диалог для отправки сообщения
-    if (userToMessage != null) {
-        AlertDialog(
-            onDismissRequest = { userToMessage = null },
-            title = { Text("Сообщение для $userToMessage") },
-            text = {
-                OutlinedTextField(
-                    value = messageText,
-                    onValueChange = { messageText = it },
-                    label = { Text("Текст сообщения") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    if (messageText.isNotBlank()) {
-                        FirebaseDatabase.getInstance().getReference("users/$userToMessage/notifications")
-                            .push().setValue(messageText)
-                        userToMessage = null
-                        messageText = ""
-                    }
-                }) { Text("Отправить") }
-            },
-            dismissButton = {
-                TextButton(onClick = { userToMessage = null }) { Text("Отмена") }
-            }
-        )
-    }
-
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (authorized) "Режим разработчика" else "Доступ разработчика") },
+        title = { Text("Режим разработчика") },
         text = {
-            if (authorized) Column {
+            Column {
                 usersError?.let {
                     Text(
                         text = it,
@@ -474,95 +2101,164 @@ private fun DeveloperDialog(onDismiss: () -> Unit) {
                                     Text("Правильных ответов: ${activity.learned}")
                                     Text("Неправильных ответов: ${activity.wrong}")
                                 }
-                                
-                                // Кнопка сообщения
-                                Box(
-                                    modifier = Modifier
-                                        .clickable { userToMessage = user }
-                                        .padding(8.dp)
-                                ) {
-                                    Text("💬", fontSize = 18.sp)
-                                }
                             }
                         }
                     }
                 }
 
                 Button(
-                    onClick = { picker.launch("*/*") },
+                    onClick = { picker.launch("text/*") },
                     enabled = selectedUser != null,
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
                 ) {
-                    Text("Выбрать CSV и отправить")
+                    Text("Выбрать колоды и отправить")
                 }
 
                 uploadMessage?.let { Text(it, modifier = Modifier.padding(top = 8.dp)) }
+                if (selectedUser != null) {
+                    Text(
+                        "Файлы ошибок",
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
+                    errorReportsMessage?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error)
+                    }
+                    if (errorReports.isEmpty()) {
+                        Text("Нет доступных файлов")
+                    } else {
+                        errorReports.forEach { fileName ->
+                            TextButton(
+                                onClick = {
+                                    FirebaseStorage.getInstance(FIREBASE_STORAGE_BUCKET)
+                                        .reference.child("error_reports/$selectedUser/$fileName")
+                                        .getBytes(ERROR_REPORT_MAX_BYTES)
+                                        .addOnSuccessListener { bytes ->
+                                            reportToSave = fileName to bytes
+                                            saveReportLauncher.launch(fileName)
+                                        }
+                                        .addOnFailureListener {
+                                            errorReportsMessage = "Не удалось скачать файл: ${it.message}"
+                                        }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Скачать $fileName")
+                            }
+                        }
+                    }
+                }
             }
-            else OutlinedTextField(
-                value = password,
-                onValueChange = { password = it },
-                label = { Text("Пароль") },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation()
-            )
         },
         confirmButton = {
-            TextButton(onClick = {
-                if (authorized) onDismiss() else authorized = password == DEVELOPER_PASSWORD
-            }) { Text(if (authorized) "Закрыть" else "Войти") }
-        },
-        dismissButton = { if (!authorized) TextButton(onClick = onDismiss) { Text("Отмена") } }
+            TextButton(onClick = { onDismiss() }) { Text("Закрыть") }
+        }
     )
 }
 
 private fun Long?.orZero(): Long = this ?: 0L
 
 @Composable
-fun FlashcardApp(modifier: Modifier = Modifier) {
+fun FlashcardApp(
+    pinkTheme: Boolean,
+    onThemeChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
     val context = LocalContext.current
     val blocks = remember {
         val savedBlocks = loadBlocksFromStorage(context)
         if (savedBlocks != null) {
             mutableStateListOf(*savedBlocks.toTypedArray())
         } else {
-            val initial = listOf(
-                FlashcardBlock("Животные (CSV)", loadFlashcardsFromCsv(context, "animals.csv")),
-                FlashcardBlock("Еда (CSV)", loadFlashcardsFromCsv(context, "food.csv")),
-                FlashcardBlock("Встроенные", listOf(
-                    Flashcard("Test", "Тест"),
-                    Flashcard("Android", "Андроид")
-                ))
-            )
+            val initial = emptyList<FlashcardBlock>()
             saveBlocksToStorage(context, initial)
             mutableStateListOf(*initial.toTypedArray())
         }
     }
 
-    var activeSession by remember { mutableStateOf<StudySession?>(null) }
-    var pausedSession by remember { mutableStateOf<StudySession?>(null) }
-    var blockForDialog by remember { mutableStateOf<FlashcardBlock?>(null) }
-    var isReverseMode by remember { mutableStateOf(true) }
+    var activeSession by rememberSaveable { mutableStateOf<StudySession?>(null) }
+    var pausedSession by rememberSaveable { mutableStateOf<StudySession?>(null) }
+    var blockForDialog by rememberSaveable { mutableStateOf<FlashcardBlock?>(null) }
+    var isReverseMode by rememberSaveable { mutableStateOf(true) }
+    var availableCloudDecks by remember { mutableStateOf(0) }
+
+    var currentTab by rememberSaveable { mutableStateOf(MainTab.DECKS) }
+
+    // После переустановки восстанавливаем колоды из базы по авторизованному аккаунту.
+    LaunchedEffect(Unit) {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid
+        if (!uid.isNullOrBlank()) {
+            FirebaseDatabase.getInstance().getReference("users/$uid/flashcards")
+                .addListenerForSingleValueEvent(object : ValueEventListener {
+                    override fun onDataChange(snapshot: DataSnapshot) {
+                        val cloudBlocks = snapshot.children.mapNotNull { blockSnapshot ->
+                            val name = blockSnapshot.child("name").getValue(String::class.java) ?: return@mapNotNull null
+                            val cards = blockSnapshot.child("cards").children.mapNotNull { cardSnapshot ->
+                                val front = cardSnapshot.child("front").getValue(String::class.java) ?: return@mapNotNull null
+                                val back = cardSnapshot.child("back").getValue(String::class.java) ?: return@mapNotNull null
+                                Flashcard(front, back, cardSnapshot.child("isKnown").getValue(Boolean::class.java))
+                            }
+                            FlashcardBlock(name, cards)
+                        }
+                        if (cloudBlocks.isNotEmpty() || snapshot.exists()) {
+                            blocks.clear()
+                            blocks.addAll(cloudBlocks)
+                            saveBlocksToStorage(context, blocks, syncCloud = false)
+                        } else if (blocks.isNotEmpty()) {
+                            saveBlocksToStorage(context, blocks)
+                        }
+                    }
+                    override fun onCancelled(error: DatabaseError) = Unit
+                })
+        }
+    }
+    
+    // Получаем текущую тему и функцию ее изменения из контекста, 
+    // чтобы передать их в BottomTools, который теперь будет жить здесь
+    val prefs = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
+    var pinkTheme by remember {
+        mutableStateOf(prefs.getBoolean("is_pink_theme", false))
+    }
 
     // Слушатель уведомлений от разработчика
     val nickname = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE).getString(NICKNAME_KEY, null)
     LaunchedEffect(nickname) {
         if (!nickname.isNullOrBlank()) {
-            val ref = FirebaseDatabase.getInstance().getReference("users/$nickname/notifications")
-            val listener = object : ChildEventListener {
-                override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
-                    val msg = snapshot.getValue(String::class.java) ?: return
-                    showAdminMessageNotification(context, msg)
-                    snapshot.ref.removeValue() // Удаляем сообщение из БД после того как показали
+            FirebaseMessaging.getInstance().token
+                .addOnSuccessListener { token: String ->
+                    FirebaseDatabase.getInstance()
+                        .getReference("users/$nickname/fcmToken")
+                        .setValue(token)
+                        .addOnFailureListener { error ->
+                            Log.e("FCM", "Не удалось сохранить FCM-токен", error)
+                        }
                 }
-                override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {}
-                override fun onChildRemoved(snapshot: DataSnapshot) {}
-                override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {}
-                override fun onCancelled(error: DatabaseError) {}
-            }
-            ref.addChildEventListener(listener)
+                .addOnFailureListener { error ->
+                    Log.e("FCM", "Не удалось получить FCM-токен", error)
+                }
         }
     }
+    DisposableEffect(nickname) {
+        var decksRef: com.google.firebase.database.DatabaseReference? = null
+        var listener: ValueEventListener? = null
+        if (!nickname.isNullOrBlank()) {
+            decksRef = FirebaseDatabase.getInstance()
+                .getReference("users/$nickname/available_decks_count")
+            listener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    availableCloudDecks = snapshot.getValue(Long::class.java)?.toInt()?.coerceAtLeast(0) ?: 0
+                }
 
+                override fun onCancelled(error: DatabaseError) {}
+            }
+            decksRef.addValueEventListener(listener!!)
+        }
+        onDispose {
+            if (decksRef != null && listener != null) {
+                decksRef!!.removeEventListener(listener!!)
+            }
+        }
+    }
     val closeActiveSession = {
         val session = activeSession
         session?.takeIf { it.isErrorsOnly }?.let { errorSession ->
@@ -574,6 +2270,45 @@ fun FlashcardApp(modifier: Modifier = Modifier) {
         }
         saveBlocksToStorage(context, blocks)
         activeSession = null
+    }
+
+    var showExitConfirmationDialog by remember { mutableStateOf(false) }
+
+    // 1. Перехватываем системную кнопку "Назад" на главных вкладках и переходим на вкладку "Колоды"
+    BackHandler(enabled = activeSession == null) {
+        if (currentTab != MainTab.DECKS) {
+            currentTab = MainTab.DECKS
+        }
+    }
+
+    // 2. В режиме обучения перехватываем системную кнопку "Назад" и вызываем диалог подтверждения
+    BackHandler(enabled = activeSession != null) {
+        showExitConfirmationDialog = true
+    }
+
+    val requestExitSession = {
+        showExitConfirmationDialog = true
+    }
+
+    if (showExitConfirmationDialog) {
+        AlertDialog(
+            onDismissRequest = { showExitConfirmationDialog = false },
+            title = { Text("Выйти из тренировки?") },
+            text = { Text("Ваш текущий прогресс будет сохранен. Вы сможете продолжить обучение позже.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showExitConfirmationDialog = false
+                    closeActiveSession()
+                }) {
+                    Text("Выйти", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExitConfirmationDialog = false }) {
+                    Text("Отмена")
+                }
+            }
+        )
     }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
@@ -593,33 +2328,80 @@ fun FlashcardApp(modifier: Modifier = Modifier) {
     }
 
     if (activeSession == null) {
-        BlockSelectionScreen(
-            blocks = blocks,
-            isReverseMode = isReverseMode,
-            onModeChange = { isReverseMode = it },
-            onBlockSelected = { block -> blockForDialog = block },
-            onImportClick = { filePickerLauncher.launch("*/*") },
-            onDownloadClick = { downloadSharedDecks(context, blocks) },
-            onDeleteBlock = { block ->
-                val index = blocks.indexOfFirst { it === block }.takeIf { it >= 0 } ?: blocks.indexOf(block)
-                if (index >= 0) blocks.removeAt(index)
-                saveBlocksToStorage(context, blocks)
-            },
-            onRenameBlock = { block, newName ->
-                val index = blocks.indexOf(block)
-                if (index != -1) {
-                    blocks[index] = block.copy(name = newName)
-                    saveBlocksToStorage(context, blocks)
+        Scaffold(
+            bottomBar = {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = currentTab == MainTab.PROFILE,
+                        onClick = { currentTab = MainTab.PROFILE },
+                        icon = { Icon(Icons.Filled.Person, contentDescription = "Профиль") },
+                        label = { Text("Профиль") }
+                    )
+                    NavigationBarItem(
+                        selected = currentTab == MainTab.DECKS,
+                        onClick = { currentTab = MainTab.DECKS },
+                        icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Колоды") },
+                        label = { Text("Колоды") }
+                    )
+                    NavigationBarItem(
+                        selected = currentTab == MainTab.SETTINGS,
+                        onClick = { currentTab = MainTab.SETTINGS },
+                        icon = { Icon(Icons.Filled.Settings, contentDescription = "Настройки") },
+                        label = { Text("Настройки") }
+                    )
+                    NavigationBarItem(
+                        selected = currentTab == MainTab.CHAT,
+                        onClick = { currentTab = MainTab.CHAT },
+                        icon = { Icon(Icons.Filled.Email, contentDescription = "Чат") },
+                        label = { Text("Чат") }
+                    )
                 }
-            },
-            modifier = modifier
-        )
+            }
+        ) { paddingValues ->
+            Box(modifier = modifier.padding(paddingValues).fillMaxSize()) {
+                when (currentTab) {
+                    MainTab.PROFILE -> ProfileScreen()
+                    MainTab.DECKS -> {
+                        BlockSelectionScreen(
+                            blocks = blocks,
+                            isReverseMode = isReverseMode,
+                            onModeChange = { isReverseMode = it },
+                            onBlockSelected = { block -> blockForDialog = block },
+                            onImportClick = { filePickerLauncher.launch("*/*") },
+                            onDownloadClick = { downloadSharedDecks(context, blocks) },
+                            availableCloudDecks = availableCloudDecks,
+                            onDeleteBlock = { block ->
+                                val index = blocks.indexOfFirst { it === block }.takeIf { it >= 0 } ?: blocks.indexOf(block)
+                                if (index >= 0) blocks.removeAt(index)
+                                saveBlocksToStorage(context, blocks)
+                            },
+                            onRenameBlock = { block, newName ->
+                                val index = blocks.indexOf(block)
+                                if (index != -1) {
+                                    blocks[index] = block.copy(name = newName)
+                                    saveBlocksToStorage(context, blocks)
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    MainTab.SETTINGS -> {
+                        SettingsScreen(
+                            pinkTheme = pinkTheme,
+                            onThemeChange = onThemeChange
+                        )
+                    }
+                    MainTab.CHAT -> ChatScreen()
+                }
+            }
+        }
     } else {
         if (activeSession!!.mode == StudyMode.SWIPE) {
             FlashcardScreen(
                 session = activeSession!!,
                 isReverseMode = isReverseMode,
-                onBack = closeActiveSession,
+                onBack = requestExitSession,
+                onExportErrors = { cards, title, onSent -> uploadErrorReport(context, title, cards, onSent) },
                 onProgressChanged = { correct, card ->
                     saveBlocksToStorage(context, blocks)
                     if (correct == true && card != null) incrementLearnedToday(context, card)
@@ -631,7 +2413,8 @@ fun FlashcardApp(modifier: Modifier = Modifier) {
             TilesScreen(
                 session = activeSession!!,
                 isReverseMode = isReverseMode,
-                onBack = closeActiveSession,
+                onBack = requestExitSession,
+                onExportErrors = { cards, title, onSent -> uploadErrorReport(context, title, cards, onSent) },
                 onProgressChanged = { correct, card ->
                     saveBlocksToStorage(context, blocks)
                     if (correct == true && card != null) incrementLearnedToday(context, card)
@@ -643,7 +2426,8 @@ fun FlashcardApp(modifier: Modifier = Modifier) {
             TypingScreen(
                 session = activeSession!!,
                 isReverseMode = isReverseMode,
-                onBack = closeActiveSession,
+                onBack = requestExitSession,
+                onExportErrors = { cards, title, onSent -> uploadErrorReport(context, title, cards, onSent) },
                 onProgressChanged = { correct, card ->
                     saveBlocksToStorage(context, blocks)
                     if (correct == true && card != null) incrementLearnedToday(context, card)
@@ -774,62 +2558,113 @@ fun BlockSelectionScreen(
     onBlockSelected: (FlashcardBlock) -> Unit,
     onImportClick: () -> Unit,
     onDownloadClick: () -> Unit,
+    availableCloudDecks: Int,   
     onDeleteBlock: (FlashcardBlock) -> Unit,
     onRenameBlock: (FlashcardBlock, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val learnedToday = getLearnedToday(context)
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-    Column(
-        modifier = modifier.fillMaxSize().padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = "Выберите колоду",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
+    var blockForAction by remember { mutableStateOf<FlashcardBlock?>(null) }
+    var blockToDelete by remember { mutableStateOf<FlashcardBlock?>(null) }
+    var blockToRename by remember { mutableStateOf<FlashcardBlock?>(null) }
+    var newBlockName by remember { mutableStateOf("") }
 
-        Button(
-            onClick = onImportClick,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
-        ) { Text("Импортировать колоду (.csv)") }
+    val headerControls = @Composable {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onImportClick,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Импорт (.csv)", textAlign = TextAlign.Center, maxLines = 1, fontSize = 12.sp)
+                }
 
-        Button(
-            onClick = onDownloadClick,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
-        ) { Text("Загрузить присланные колоды") }
+                Box(modifier = Modifier.weight(1f)) {
+                    Button(
+                        onClick = onDownloadClick,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Из облака", textAlign = TextAlign.Center, maxLines = 1, fontSize = 12.sp)
+                    }
+                    if (availableCloudDecks > 0) {
+                        Text(
+                            text = availableCloudDecks.toString(),
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .background(MaterialTheme.colorScheme.error, MaterialTheme.shapes.small)
+                                .padding(horizontal = 7.dp, vertical = 2.dp),
+                            color = MaterialTheme.colorScheme.onError,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
 
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(bottom = 24.dp)
-        ) {
             Text(
-                text = "Рус -> Англ",
-                color = if (isReverseMode) MaterialTheme.colorScheme.primary else Color.Gray,
-                fontWeight = if (isReverseMode) FontWeight.Bold else FontWeight.Normal
+                text = "Выберите колоду",
+                style = if (isLandscape) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 8.dp)
             )
-            Switch(
-                checked = !isReverseMode,
-                onCheckedChange = { onModeChange(!it) },
-                modifier = Modifier.padding(horizontal = 16.dp)
-            )
+
             Text(
-                text = "Англ -> Рус",
-                color = if (!isReverseMode) MaterialTheme.colorScheme.primary else Color.Gray,
-                fontWeight = if (!isReverseMode) FontWeight.Bold else FontWeight.Normal
+                text = "/ᐠ - ˕ -マ",
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = 12.dp)
+            ) {
+                Text(
+                    text = "Рус -> Англ",
+                    color = if (isReverseMode) MaterialTheme.colorScheme.primary else Color.Gray,
+                    fontWeight = if (isReverseMode) FontWeight.Bold else FontWeight.Normal
+                )
+                Switch(
+                    checked = !isReverseMode,
+                    onCheckedChange = { onModeChange(!it) },
+                    modifier = Modifier.padding(horizontal = 10.dp)
+                )
+                Text(
+                    text = "Англ -> Рус",
+                    color = if (!isReverseMode) MaterialTheme.colorScheme.primary else Color.Gray,
+                    fontWeight = if (!isReverseMode) FontWeight.Bold else FontWeight.Normal
+                )
+            }
+        }
+    }
+
+    val footerStats = @Composable {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = "Выучено за сегодня: $learnedToday",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 13.dp, bottom = 2.dp),
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.titleMedium
+            )
+
+            Text(
+                text = "Created by scwls",
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.45f),
+                modifier = Modifier.align(Alignment.End).padding(top = 2.dp)
             )
         }
+    }
 
-        var blockForAction by remember { mutableStateOf<FlashcardBlock?>(null) }
-        var blockToDelete by remember { mutableStateOf<FlashcardBlock?>(null) }
-        var blockToRename by remember { mutableStateOf<FlashcardBlock?>(null) }
-        var newBlockName by remember { mutableStateOf("") }
-
+    val listContent = @Composable { listModifier: Modifier ->
         LazyColumn(
-            modifier = Modifier.weight(1f),
+            modifier = listModifier,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             items(
@@ -874,15 +2709,33 @@ fun BlockSelectionScreen(
                 }
             }
         }
+    }
 
-        Text(
-            text = "Выучено за сегодня: $learnedToday",
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 16.dp, bottom = 24.dp), // Добавили отступ снизу
-            textAlign = TextAlign.Center, // Выровняли текст строго по центру
-            style = MaterialTheme.typography.titleMedium
-        )
+    if (isLandscape) {
+        Row(
+            modifier = modifier.fillMaxSize().padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Column(
+                modifier = Modifier.weight(0.45f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(end = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                headerControls()
+                Spacer(modifier = Modifier.weight(1f))
+                footerStats()
+            }
+            listContent(Modifier.weight(0.55f).fillMaxHeight())
+        }
+    } else {
+        Column(
+            modifier = modifier.fillMaxSize().padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            headerControls()
+            listContent(Modifier.weight(1f))
+            footerStats()
+        }
+    }
         
         if (blockForAction != null) {
             Dialog(onDismissRequest = { blockForAction = null }) {
@@ -969,6 +2822,47 @@ fun BlockSelectionScreen(
             )
         }
     }
+
+@Composable
+private fun MistakesButton(
+    onClick: ((() -> Unit) -> Unit),
+    modifier: Modifier = Modifier
+) {
+    var sent by remember { mutableStateOf(false) }
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = when {
+            isPressed -> 0.96f
+            sent -> 1.04f
+            else -> 1f
+        },
+        label = "mistakes_button_scale"
+    )
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Button(
+            onClick = {
+                sent = false
+                onClick { sent = true }
+            },
+            interactionSource = interactionSource,
+            modifier = modifier.graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+        ) {
+            Text("Отправить ошибки")
+        }
+        AnimatedVisibility(visible = sent) {
+            Text(
+                text = "Ответы высланы",
+                color = Color(0xFF2E7D32),
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+        }
+    }
 }
 
 @Composable
@@ -976,6 +2870,7 @@ fun FlashcardScreen(
     session: StudySession,
     isReverseMode: Boolean,
     onBack: () -> Unit,
+    onExportErrors: (List<Flashcard>, String, () -> Unit) -> Unit,
     onProgressChanged: (Boolean?, Flashcard?) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1038,6 +2933,10 @@ fun FlashcardScreen(
                 Text(text = "Знаю: $correctCount | Не знаю: $wrongCount", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(vertical = 16.dp))
 
                 if (wrongCount > 0) {
+                    MistakesButton(
+                        onClick = { onExportErrors(currentCards.filter { it.isKnown == false }, session.title, it) },
+                        modifier = Modifier.padding(top = 16.dp)
+                    )
                     Button(
                         onClick = {
                             currentCards = currentCards.filter { it.isKnown == false }.onEach { it.isKnown = null }.shuffled()
@@ -1064,51 +2963,69 @@ fun FlashcardUI(
     onSwipeLeft: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val cardHeight = if (isLandscape) 180.dp else 300.dp
+    val cardPadding = if (isLandscape) 12.dp else 32.dp
+
     var isFlipped by remember { mutableStateOf(false) }
-    val offsetX = remember { Animatable(0f) }
+    var offsetX by remember { mutableStateOf(0f) }
+    var cardWidthPx by remember { mutableStateOf(0) }
     val coroutineScope = rememberCoroutineScope()
+    val swipeThreshold = (cardWidthPx * 0.25f).coerceAtLeast(140f)
+    val swipeExitDistance = (cardWidthPx * 1.35f).coerceAtLeast(1000f)
+
+    val actualFront = if (isReverseMode) flashcard.back else flashcard.front
+    val actualBack = if (isReverseMode) flashcard.front else flashcard.back
+    val textToShow = if (isFlipped) actualBack else actualFront
+
+    val scrollState = rememberScrollState()
+    LaunchedEffect(textToShow) {
+        scrollState.scrollTo(0)
+    }
 
     val defaultColor = if (isFlipped) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primaryContainer
     val targetColor = when {
-        offsetX.value > 0 -> Color(0xFF81C784)
-        offsetX.value < 0 -> Color(0xFFE57373)
+        offsetX > 0 -> Color(0xFF81C784)
+        offsetX < 0 -> Color(0xFFE57373)
         else -> defaultColor
     }
 
-    val dragFraction = min(abs(offsetX.value) / 300f, 0.8f)
+    val dragFraction = min(abs(offsetX) / 300f, 0.8f)
     val backgroundColor = lerp(defaultColor, targetColor, dragFraction)
 
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .padding(32.dp)
-            .height(300.dp)
-            .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+            .padding(cardPadding)
+            .height(cardHeight)
+            .onSizeChanged { cardWidthPx = it.width }
+            .graphicsLayer {
+                translationX = offsetX
+            }
             .clickable { isFlipped = !isFlipped }
             .pointerInput(isFlipped) {
                 if (isFlipped) {
                     detectHorizontalDragGestures(
                         onDragEnd = {
                             coroutineScope.launch {
-                                val threshold = 200f
-                                if (offsetX.value > threshold) {
-                                    offsetX.animateTo(targetValue = 1000f, animationSpec = tween(300))
+                                if (offsetX > swipeThreshold) {
+                                    animateSwipeOffset(offsetX, swipeExitDistance, 180) { offsetX = it }
                                     onSwipeRight()
                                     isFlipped = false
-                                    offsetX.snapTo(0f)
-                                } else if (offsetX.value < -threshold) {
-                                    offsetX.animateTo(targetValue = -1000f, animationSpec = tween(300))
+                                    offsetX = 0f
+                                } else if (offsetX < -swipeThreshold) {
+                                    animateSwipeOffset(offsetX, -swipeExitDistance, 180) { offsetX = it }
                                     onSwipeLeft()
                                     isFlipped = false
-                                    offsetX.snapTo(0f)
+                                    offsetX = 0f
                                 } else {
-                                    offsetX.animateTo(targetValue = 0f, animationSpec = tween(300))
+                                    animateSwipeOffset(offsetX, 0f, 160) { offsetX = it }
                                 }
                             }
                         },
                         onHorizontalDrag = { change, dragAmount ->
                             change.consume()
-                            coroutineScope.launch { offsetX.snapTo(offsetX.value + dragAmount) }
+                            offsetX += dragAmount
                         }
                     )
                 }
@@ -1116,16 +3033,20 @@ fun FlashcardUI(
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
         colors = CardDefaults.cardColors(containerColor = backgroundColor)
     ) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            val actualFront = if (isReverseMode) flashcard.back else flashcard.front
-            val actualBack = if (isReverseMode) flashcard.front else flashcard.back
-
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .drawVerticalScrollbar(scrollState),
+            contentAlignment = Alignment.Center
+        ) {
             Text(
-                text = if (isFlipped) actualBack else actualFront,
+                text = textToShow,
                 style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.padding(16.dp)
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(scrollState)
             )
         }
     }
@@ -1136,18 +3057,22 @@ fun TilesScreen(
     session: StudySession,
     isReverseMode: Boolean,
     onBack: () -> Unit,
+    onExportErrors: (List<Flashcard>, String, () -> Unit) -> Unit,
     onProgressChanged: (Boolean?, Flashcard?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     var currentCards by remember(session) { mutableStateOf(session.cards) }
     var currentChunkIndex by remember(session) { mutableStateOf(session.currentPosition) }
     var roundId by remember(session) { mutableStateOf(0) }
     val chunks = remember(currentCards) { currentCards.chunked(4) }
 
     Column(modifier = modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.Start) {
-            Button(onClick = onBack) { Text("<- Назад") }
+        if (!isLandscape) {
+            Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.Start) {
+                Button(onClick = onBack) { Text("<- Назад") }
+            }
         }
 
         if (currentChunkIndex < chunks.size) {
@@ -1185,8 +3110,6 @@ fun TilesScreen(
                     selectedLeftId = null
                     selectedRightId = null
                     
-                    // Переходим на следующий экран, когда ВСЕ левые карточки "израсходованы"
-                    // (либо угаданы правильно, либо были потрачены в ошибке)
                     if (matchedIds.size + errorLeftIds.size == currentChunk.size) {
                         coroutineScope.launch {
                             delay(600)
@@ -1197,48 +3120,165 @@ fun TilesScreen(
                 }
             }
 
-            Text(
-                text = "Найдите пары (${currentChunkIndex + 1}/${chunks.size}):",
-                modifier = Modifier.padding(bottom = 16.dp),
-                style = MaterialTheme.typography.titleLarge
-            )
-
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column(modifier = Modifier.weight(1f)) {
-                    leftItems.forEach { item ->
-                        val text = if (isReverseMode) item.card.back else item.card.front
-                        val isMatched = matchedIds.contains(item.id)
-                        val isError = errorLeftIds.contains(item.id)
-                        val isSelected = selectedLeftId == item.id
-                        // Новое: блокируем левую карточку, если она угадана ИЛИ если была ошибка
-                        val isDisabled = isMatched || isError
-
-                        TileButton(text = text, isMatched = isMatched, isSelected = isSelected, isError = isError, isDisabled = isDisabled) {
-                            if (!isDisabled) {
-                                if (selectedLeftId != null && selectedRightId != null) return@TileButton
-                                selectedLeftId = if (selectedLeftId == item.id) null else item.id
-                                if (selectedLeftId != null) checkMatch()
-                            }
-                        }
-                    }
+            if (isLandscape) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Button(onClick = onBack) { Text("<- Назад") }
+                    Text(
+                        text = "Найдите пары (${currentChunkIndex + 1}/${chunks.size}):",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
-                Spacer(modifier = Modifier.width(16.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    rightItems.forEach { item ->
-                        val text = if (isReverseMode) item.card.front else item.card.back
-                        val isMatched = matchedIds.contains(item.id)
-                        val isError = errorRightIds.contains(item.id)
-                        val isSelected = selectedRightId == item.id
-                        val isDisabled = isMatched
+            }
 
-                        TileButton(text = text, isMatched = isMatched, isSelected = isSelected, isError = isError, isDisabled = isDisabled) {
-                            if (!isDisabled) {
-                                if (selectedLeftId != null && selectedRightId != null) return@TileButton
-                                selectedRightId = if (selectedRightId == item.id) null else item.id
-                                if (selectedRightId != null) checkMatch()
+            Column(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = if (isLandscape) Arrangement.Center else Arrangement.Top
+            ) {
+                if (!isLandscape) {
+                    Spacer(modifier = Modifier.weight(0.3f))
+                    Text(
+                        text = "Найдите пары (${currentChunkIndex + 1}/${chunks.size}):",
+                        modifier = Modifier.padding(bottom = 24.dp),
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                }
+
+                if (isLandscape) {
+                    // В альбомном режиме раскладываем 2х2 слева и 2х2 справа с центральной разделительной полосой
+                    Row(
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Левая колонка (Слова): 2 строки по 2 плитки
+                        Column(
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            leftItems.chunked(2).forEach { rowItems ->
+                                Row(
+                                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    rowItems.forEach { item ->
+                                        val text = if (isReverseMode) item.card.back else item.card.front
+                                        val isMatched = matchedIds.contains(item.id)
+                                        val isError = errorLeftIds.contains(item.id)
+                                        val isSelected = selectedLeftId == item.id
+                                        val isDisabled = isMatched || isError
+
+                                        TileButton(
+                                            text = text,
+                                            isMatched = isMatched,
+                                            isSelected = isSelected,
+                                            isError = isError,
+                                            isDisabled = isDisabled,
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            if (!isDisabled) {
+                                                if (selectedLeftId != null && selectedRightId != null) return@TileButton
+                                                selectedLeftId = if (selectedLeftId == item.id) null else item.id
+                                                if (selectedLeftId != null) checkMatch()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Вертикальная разделительная черта по центру экрана
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight(0.9f)
+                                .width(2.dp)
+                                .background(
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                                    shape = RoundedCornerShape(1.dp)
+                                )
+                        )
+
+                        // Правая колонка (Переводы): 2 строки по 2 плитки
+                        Column(
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            rightItems.chunked(2).forEach { rowItems ->
+                                Row(
+                                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    rowItems.forEach { item ->
+                                        val text = if (isReverseMode) item.card.front else item.card.back
+                                        val isMatched = matchedIds.contains(item.id)
+                                        val isError = errorRightIds.contains(item.id)
+                                        val isSelected = selectedRightId == item.id
+                                        val isDisabled = isMatched
+
+                                        TileButton(
+                                            text = text,
+                                            isMatched = isMatched,
+                                            isSelected = isSelected,
+                                            isError = isError,
+                                            isDisabled = isDisabled,
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            if (!isDisabled) {
+                                                if (selectedLeftId != null && selectedRightId != null) return@TileButton
+                                                selectedRightId = if (selectedRightId == item.id) null else item.id
+                                                if (selectedRightId != null) checkMatch()
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
+                } else {
+                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            leftItems.forEach { item ->
+                                val text = if (isReverseMode) item.card.back else item.card.front
+                                val isMatched = matchedIds.contains(item.id)
+                                val isError = errorLeftIds.contains(item.id)
+                                val isSelected = selectedLeftId == item.id
+                                val isDisabled = isMatched || isError
+
+                                TileButton(text = text, isMatched = isMatched, isSelected = isSelected, isError = isError, isDisabled = isDisabled) {
+                                    if (!isDisabled) {
+                                        if (selectedLeftId != null && selectedRightId != null) return@TileButton
+                                        selectedLeftId = if (selectedLeftId == item.id) null else item.id
+                                        if (selectedLeftId != null) checkMatch()
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            rightItems.forEach { item ->
+                                val text = if (isReverseMode) item.card.front else item.card.back
+                                val isMatched = matchedIds.contains(item.id)
+                                val isError = errorRightIds.contains(item.id)
+                                val isSelected = selectedRightId == item.id
+                                val isDisabled = isMatched
+
+                                TileButton(text = text, isMatched = isMatched, isSelected = isSelected, isError = isError, isDisabled = isDisabled) {
+                                    if (!isDisabled) {
+                                        if (selectedLeftId != null && selectedRightId != null) return@TileButton
+                                        selectedRightId = if (selectedRightId == item.id) null else item.id
+                                        if (selectedRightId != null) checkMatch()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.weight(1f))
                 }
             }
         } else {
@@ -1249,6 +3289,10 @@ fun TilesScreen(
                 Text(text = "Тренировка завершена!", style = MaterialTheme.typography.headlineMedium)
                 Text(text = "Знаю: $correctCount | Не знаю: $wrongCount", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(vertical = 16.dp))
                 if (wrongCount > 0) {
+                    MistakesButton(
+                        onClick = { onExportErrors(currentCards.filter { it.isKnown == false }, session.title, it) },
+                        modifier = Modifier.padding(top = 16.dp)
+                    )
                     Button(
                         onClick = {
                             currentCards = currentCards.filter { it.isKnown == false }.onEach { it.isKnown = null }.shuffled()
@@ -1272,13 +3316,17 @@ fun TypingScreen(
     session: StudySession,
     isReverseMode: Boolean,
     onBack: () -> Unit,
+    onExportErrors: (List<Flashcard>, String, () -> Unit) -> Unit,
     onProgressChanged: (Boolean?, Flashcard?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var currentIndex by remember(session) { mutableStateOf(session.currentPosition) }
     val card = session.cards.getOrNull(currentIndex)
     var answer by remember(currentIndex) { mutableStateOf("") }
-    var submitted by remember(currentIndex) { mutableStateOf(false) }
+    
+    // Если мы загрузили карточку, которая УЖЕ была отгадана (или провалена) ранее,
+    // сразу помечаем её как submitted, чтобы не давать вводить заново
+    var submitted by remember(currentIndex) { mutableStateOf(card?.isKnown != null) }
 
     Column(modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(Modifier.fillMaxWidth().padding(16.dp)) {
@@ -1289,14 +3337,18 @@ fun TypingScreen(
             val expected = if (isReverseMode) card.front else card.back
             Text("${session.title}: ${currentIndex + 1} / ${session.cards.size}")
             Column(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
+                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Spacer(modifier = Modifier.weight(0.5f))
                 
-                Text(prompt, style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(bottom = 32.dp))
+                Text(
+                    text = prompt, 
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold, 
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)
+                )
                 
                 OutlinedTextField(
                     value = answer,
@@ -1304,7 +3356,7 @@ fun TypingScreen(
                     label = { Text("Введите перевод") },
                     singleLine = true,
                     enabled = !submitted,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp)
                 )
                 if (submitted) {
                     val resultColor by animateColorAsState(
@@ -1312,32 +3364,67 @@ fun TypingScreen(
                         label = "answer_result_color"
                     )
                     Text(
-                        if (card.isKnown == true) "Правильно" else "Неправильно. Ответ: $expected",
+                        text = if (card.isKnown == true) "Правильно!" else "Правильный ответ: $expected",
                         color = resultColor,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(top = 16.dp)
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)
                     )
                 }
                 
                 Spacer(modifier = Modifier.weight(1f))
             }
-            Button(
-                onClick = {
-                    if (!submitted) {
-                        val correct = answer.trim().equals(expected.trim(), ignoreCase = true)
-                        card.isKnown = correct
-                        submitted = true
-                        onProgressChanged(correct, card)
-                    } else {
+            
+            if (!submitted) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 24.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            card.isKnown = false
+                            submitted = true
+                            onProgressChanged(false, card)
+                            
+                            // Сохраняем, что мы ПРОШЛИ это слово, чтобы при возврате
+                            // из меню нас кинуло на следующее слово
+                            session.currentPosition = currentIndex + 1
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Не знаю") }
+                    
+                    Button(
+                        onClick = {
+                            val correct = answer.trim().equals(expected.trim(), ignoreCase = true)
+                            card.isKnown = correct
+                            submitted = true
+                            onProgressChanged(correct, card)
+                            
+                            // Сохраняем позицию следующего слова
+                            session.currentPosition = currentIndex + 1
+                        },
+                        enabled = answer.isNotBlank(),
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Проверить") }
+                }
+            } else {
+                Button(
+                    onClick = {
                         currentIndex++
-                        session.currentPosition = currentIndex
-                    }
-                },
-                enabled = submitted || answer.isNotBlank(),
-                modifier = Modifier.fillMaxWidth().padding(24.dp)
-            ) { Text(if (submitted) "Следующее слово" else "Проверить") }
+                        // session.currentPosition = currentIndex // Убрал отсюда, так как мы уже сохранили это при ответе
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 24.dp)
+                ) { Text("Следующее слово") }
+            }
         } else {
             Text("Тренировка завершена!", style = MaterialTheme.typography.headlineMedium)
+            val wrongCards = session.cards.filter { it.isKnown == false }
+            if (wrongCards.isNotEmpty()) {
+                MistakesButton(
+                    onClick = { onExportErrors(wrongCards, session.title, it) },
+                    modifier = Modifier.padding(top = 16.dp)
+                )
+            }
             Button(onClick = onBack, modifier = Modifier.padding(top = 16.dp)) { Text("Вернуться в меню") }
         }
     }
@@ -1345,9 +3432,49 @@ fun TypingScreen(
 
 private data class TileItem(val id: Int, val card: Flashcard)
 
+fun Modifier.drawVerticalScrollbar(
+    scrollState: ScrollState,
+    color: Color = Color.Gray.copy(alpha = 0.45f)
+): Modifier = drawWithContent {
+    drawContent()
+    val maxValue = scrollState.maxValue
+    if (maxValue > 0) {
+        val elementHeight = size.height
+        val topPadding = 10.dp.toPx()
+        val bottomPadding = 10.dp.toPx()
+        val rightPadding = 6.dp.toPx()
+        val barWidth = 3.dp.toPx()
+
+        val usableHeight = elementHeight - topPadding - bottomPadding
+        if (usableHeight > 0) {
+            val totalContentHeight = elementHeight + maxValue
+            val visibleRatio = elementHeight / totalContentHeight
+            val barHeight = (usableHeight * visibleRatio).coerceAtLeast(12.dp.toPx())
+            val scrollValue = scrollState.value.toFloat()
+            val barTop = topPadding + (scrollValue / maxValue) * (usableHeight - barHeight)
+            val barLeft = size.width - barWidth - rightPadding
+
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(barLeft, barTop),
+                size = Size(barWidth, barHeight),
+                cornerRadius = CornerRadius(barWidth / 2, barWidth / 2)
+            )
+        }
+    }
+}
+
 @Composable
-fun TileButton(text: String, isMatched: Boolean, isSelected: Boolean, isError: Boolean, isDisabled: Boolean, onClick: () -> Unit) {
-    // Если карточка участвовала в ошибке, но теперь отгадана верно (актуально для правой колонки)
+fun TileButton(
+    text: String,
+    isMatched: Boolean,
+    isSelected: Boolean,
+    isError: Boolean,
+    isDisabled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val isSplit = isMatched && isError
     
     val backgroundColor = when {
@@ -1358,8 +3485,22 @@ fun TileButton(text: String, isMatched: Boolean, isSelected: Boolean, isError: B
         else -> MaterialTheme.colorScheme.surfaceVariant
     }
 
+    // Состояние скролла для длинного текста
+    val scrollState = rememberScrollState()
+    
+    // При смене текста (новая карточка) сбрасываем скролл на самый верх
+    LaunchedEffect(text) {
+        scrollState.scrollTo(0)
+    }
+
+    val baseCardModifier = if (isLandscape) {
+        Modifier.fillMaxWidth().fillMaxHeight().padding(vertical = 3.dp)
+    } else {
+        Modifier.fillMaxWidth().height(100.dp).padding(vertical = 8.dp)
+    }
+
     Card(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).height(80.dp).clickable(enabled = !isDisabled, onClick = onClick),
+        modifier = modifier.then(baseCardModifier).clickable(enabled = !isDisabled, onClick = onClick),
         colors = CardDefaults.cardColors(containerColor = backgroundColor),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
@@ -1380,8 +3521,19 @@ fun TileButton(text: String, isMatched: Boolean, isSelected: Boolean, isError: B
             baseModifier
         }
 
-        Box(modifier = finalModifier, contentAlignment = Alignment.Center) {
-            Text(text = text, textAlign = TextAlign.Center, modifier = Modifier.padding(8.dp), style = MaterialTheme.typography.bodyLarge)
+        Box(
+            modifier = finalModifier.drawVerticalScrollbar(scrollState), 
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = text, 
+                textAlign = TextAlign.Center, 
+                modifier = Modifier
+                    .padding(8.dp)
+                    .verticalScroll(scrollState), // Добавили вертикальный скролл
+                style = if (isLandscape) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium, 
+                fontWeight = FontWeight.SemiBold
+            )
         }
     }
 }
@@ -1438,27 +3590,183 @@ fun parseFlashcardsFromCsv(bytes: ByteArray): List<Flashcard> {
     }.toList()
 }
 
-fun downloadSharedDecks(context: Context, blocks: MutableList<FlashcardBlock>) {
+private fun csvCell(value: String): String =
+    "\"" + value.replace("\"", "\"\"") + "\""
+
+fun uploadErrorReport(
+    context: Context,
+    deckName: String,
+    cards: List<Flashcard>,
+    onSuccess: () -> Unit = {}
+) {
+    val nickname = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
+        .getString(NICKNAME_KEY, null)
+        ?: return
+    if (cards.isEmpty()) return
+
+    val csv = buildString {
+        appendLine()
+        cards.forEach { card ->
+            append(card.front.replace("\r", " ").replace("\n", " "))
+            append(',')
+            appendLine(card.back.replace("\r", " ").replace("\n", " "))
+        }
+    }
+    val safeDeckName = deckName.replace(Regex("[^A-Za-z0-9А-Яа-яёЁ._-]"), "_")
+    val fileName = "${safeDeckName}_mistakes.csv"
+    FirebaseStorage.getInstance(FIREBASE_STORAGE_BUCKET)
+        .reference.child("error_reports/$nickname/$fileName")
+        .putBytes(csv.toByteArray(StandardCharsets.UTF_8))
+        .addOnSuccessListener { onSuccess() }
+}
+
+fun sendDeckToUser(
+    context: Context,
+    targetUserNickname: String,
+    deckName: String,
+    cards: List<Flashcard>,
+    onSuccess: () -> Unit,
+    onFailure: (String) -> Unit
+) {
+    val myNickname = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
+        .getString(NICKNAME_KEY, "Друг") ?: "Друг"
+        
+    val csv = buildString {
+        appendLine("front,back")
+        cards.forEach { card ->
+            append(card.front.replace("\r", " ").replace("\n", " "))
+            append(',')
+            appendLine(card.back.replace("\r", " ").replace("\n", " "))
+        }
+    }
+    
+    val safeDeckName = deckName.replace(Regex("[^A-Za-z0-9А-Яа-яёЁ._-]"), "_")
+    val fileName = "${safeDeckName}.csv"
+    val bytes = csv.toByteArray(StandardCharsets.UTF_8)
+    
+    FirebaseStorage.getInstance(FIREBASE_STORAGE_BUCKET)
+        .reference
+        .child("decks/$targetUserNickname/$fileName")
+        .putBytes(bytes)
+        .addOnSuccessListener {
+            FirebaseDatabase.getInstance()
+                .getReference("users/$targetUserNickname/available_decks_count")
+                .runTransaction(object : Transaction.Handler {
+                    override fun doTransaction(currentData: MutableData): Transaction.Result {
+                        val count = currentData.getValue(Long::class.java) ?: 0L
+                        currentData.value = count + 1L
+                        return Transaction.success(currentData)
+                    }
+
+                    override fun onComplete(
+                        error: DatabaseError?,
+                        committed: Boolean,
+                        currentData: DataSnapshot?
+                    ) = Unit
+                })
+                
+            FirebaseDatabase.getInstance()
+                .getReference("notificationRequests/$targetUserNickname")
+                .push()
+                .setValue("Пользователь $myNickname отправил вам колоду «$deckName». Откройте «Из облака», чтобы скачать её.")
+                
+            onSuccess()
+        }
+        .addOnFailureListener { error ->
+            onFailure(error.message ?: "Не удалось отправить колоду")
+        }
+}
+
+fun downloadSharedDecks(
+    context: Context,
+    blocks: MutableList<FlashcardBlock>,
+    onComplete: () -> Unit = {}
+) {
     val nickname = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
         .getString(NICKNAME_KEY, null) ?: return
     FirebaseStorage.getInstance().reference.child("decks/$nickname").listAll()
         .addOnSuccessListener { result ->
-            if (result.items.isEmpty()) return@addOnSuccessListener
-            var remaining = result.items.size
-            result.items.forEach { file ->
-                file.getBytes(10L * 1024L * 1024L).addOnSuccessListener { bytes ->
-                    val cards = parseFlashcardsFromCsv(bytes)
-                    if (cards.isNotEmpty()) blocks.add(FlashcardBlock(file.name.removeSuffix(".csv"), cards))
-                    file.delete().addOnCompleteListener {
-                        remaining--
-                        if (remaining == 0) saveBlocksToStorage(context, blocks)
-                    }
-                }.addOnFailureListener {
-                    remaining--
-                    if (remaining == 0) saveBlocksToStorage(context, blocks)
-                }
+            fun finish() {
+                saveBlocksToStorage(context, blocks)
+                onComplete()
             }
+
+            fun processNext(index: Int) {
+                if (index >= result.items.size) {
+                    finish()
+                    return
+                }
+
+                val file = result.items[index]
+                file.getBytes(10L * 1024L * 1024L)
+                    .addOnSuccessListener { bytes ->
+                        val cards = parseFlashcardsFromCsv(bytes)
+                        file.delete()
+                            .addOnSuccessListener {
+                                decrementAvailableDeckCount(nickname)
+                                if (cards.isNotEmpty()) {
+                                    blocks.add(
+                                        FlashcardBlock(
+                                            file.name.removeSuffix(".csv"),
+                                            cards
+                                        )
+                                    )
+                                }
+                                processNext(index + 1)
+                            }
+                            .addOnFailureListener {
+                                processNext(index + 1)
+                            }
+                    }
+                    .addOnFailureListener {
+                        processNext(index + 1)
+                    }
+            }
+
+            processNext(0)
         }
+        .addOnFailureListener {
+            onComplete()
+        }
+}
+
+private fun decrementAvailableDeckCount(nickname: String) {
+    FirebaseDatabase.getInstance()
+        .getReference("users/$nickname/available_decks_count")
+        .runTransaction(object : Transaction.Handler {
+            override fun doTransaction(currentData: MutableData): Transaction.Result {
+                val count = currentData.getValue(Long::class.java) ?: 0L
+                currentData.value = (count - 1L).coerceAtLeast(0L)
+                return Transaction.success(currentData)
+            }
+
+            override fun onComplete(
+                error: DatabaseError?,
+                committed: Boolean,
+                currentData: DataSnapshot?
+            ) = Unit
+        })
+}
+
+private suspend fun animateSwipeOffset(
+    start: Float,
+    target: Float,
+    durationMillis: Int,
+    onFrame: (Float) -> Unit
+) {
+    if (start == target) return
+
+    val startTime = withFrameNanos { it }
+    val durationNanos = durationMillis * 1_000_000L
+
+    while (true) {
+        val frameTime = withFrameNanos { it }
+        val progress = ((frameTime - startTime).toFloat() / durationNanos)
+            .coerceIn(0f, 1f)
+        val easedProgress = 1f - (1f - progress) * (1f - progress)
+        onFrame(start + (target - start) * easedProgress)
+        if (progress >= 1f) break
+    }
 }
 
 fun getFileName(context: Context, uri: Uri): String {
@@ -1492,7 +3800,7 @@ data class StudySession(
     val sourceBlockName: String = title,
     var currentPosition: Int = 0,
     var deferredErrorCards: List<Flashcard> = emptyList()
-) {
+) : Serializable {
     fun hasUnfinishedContent(): Boolean = when (mode) {
         StudyMode.SWIPE -> currentPosition < cards.size
         StudyMode.TILES -> currentPosition < cards.chunked(4).size
@@ -1506,10 +3814,52 @@ data class StudySession(
     }
 }
 
-fun saveBlocksToStorage(context: Context, blocks: List<FlashcardBlock>) {
+fun saveBlocksToStorage(context: Context, blocks: List<FlashcardBlock>, syncCloud: Boolean = true) {
     try {
         val file = File(context.filesDir, "flashcards_data.dat")
         ObjectOutputStream(file.outputStream()).use { it.writeObject(blocks.toList()) }
+        if (syncCloud) {
+            val uid = FirebaseAuth.getInstance().currentUser?.uid
+            if (!uid.isNullOrBlank()) {
+                FirebaseDatabase.getInstance().getReference("users/$uid/flashcards").setValue(blocks)
+            }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+fun createBackup(context: Context, outputStream: OutputStream) {
+    try {
+        ZipOutputStream(outputStream).use { zos ->
+            val filesToBackup = context.filesDir.listFiles { _, name -> 
+                name == "flashcards_data.dat" || (name.startsWith("chat_") && name.endsWith(".dat")) 
+            }
+            filesToBackup?.forEach { file ->
+                zos.putNextEntry(ZipEntry(file.name))
+                file.inputStream().use { it.copyTo(zos) }
+                zos.closeEntry()
+            }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+fun restoreBackup(context: Context, inputStream: InputStream) {
+    try {
+        ZipInputStream(inputStream).use { zis ->
+            var entry = zis.nextEntry
+            while (entry != null) {
+                if (entry.name == "flashcards_data.dat" || (entry.name.startsWith("chat_") && entry.name.endsWith(".dat"))) {
+                    val file = File(context.filesDir, entry.name)
+                    file.outputStream().use { fos ->
+                        zis.copyTo(fos)
+                    }
+                }
+                entry = zis.nextEntry
+            }
+        }
     } catch (e: Exception) {
         e.printStackTrace()
     }
