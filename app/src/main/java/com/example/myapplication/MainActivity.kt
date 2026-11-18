@@ -96,6 +96,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.draw.clip
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -2052,22 +2053,86 @@ fun ChatDetailScreen(
                     horizontalArrangement = if (msg.isFromMe) Arrangement.End else Arrangement.Start,
                     verticalAlignment = Alignment.Bottom
                 ) {
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (msg.isFromMe) MaterialTheme.colorScheme.primaryContainer 
-                                             else MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                            Text(msg.text)
-                            Text(
-                                text = formatMessageTime(msg.timestamp),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                modifier = Modifier.align(Alignment.End).padding(top = 2.dp)
-                            )
+                    if (msg.text.startsWith("DECK:::")) {
+                        val parts = msg.text.split(":::")
+                        val deckName = parts.getOrNull(1) ?: "Колода"
+                        val cardCount = parts.getOrNull(2) ?: "0"
+                        var isDownloading by remember { mutableStateOf(false) }
+
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (msg.isFromMe) MaterialTheme.colorScheme.primaryContainer 
+                                                 else MaterialTheme.colorScheme.surfaceVariant
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.widthIn(max = 280.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("🎴", fontSize = 28.sp)
+                                    Spacer(Modifier.width(8.dp))
+                                    Column {
+                                        Text(text = "Колода «$deckName»", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                        Text(text = "$cardCount карточек", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                    }
+                                }
+                                
+                                if (!msg.isFromMe) {
+                                    Spacer(Modifier.height(8.dp))
+                                    Button(
+                                        onClick = {
+                                            isDownloading = true
+                                            downloadSpecificSharedDeck(
+                                                context = context,
+                                                deckName = deckName,
+                                                onSuccess = { name ->
+                                                    isDownloading = false
+                                                    Toast.makeText(context, "Колода «$name» сохранена!", Toast.LENGTH_SHORT).show()
+                                                },
+                                                onFailure = { err ->
+                                                    isDownloading = false
+                                                    Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                                }
+                                            )
+                                        },
+                                        enabled = !isDownloading,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        if (isDownloading) {
+                                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
+                                        } else {
+                                            Text("Скачать", fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+
+                                Text(
+                                    text = formatMessageTime(msg.timestamp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                    modifier = Modifier.align(Alignment.End).padding(top = 4.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (msg.isFromMe) MaterialTheme.colorScheme.primaryContainer 
+                                                 else MaterialTheme.colorScheme.surfaceVariant
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                                Text(msg.text)
+                                Text(
+                                    text = formatMessageTime(msg.timestamp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                    modifier = Modifier.align(Alignment.End).padding(top = 2.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -4232,22 +4297,79 @@ fun sendDeckToUser(
                     ) = Unit
                 })
                 
-            val userAvatar = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE).getString("user_avatar", "🐱") ?: "🐱"
+            val userAvatar = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE).getString("user_avatar", "img") ?: "img"
             val notificationData = mapOf(
                 "action" to "NEW_DECK",
                 "sender" to myNickname,
-                "message" to "Отправил вам колоду «$deckName». Откройте «Из облака», чтобы скачать её.",
+                "message" to "Отправил вам колоду «$deckName». Откройте чат, чтобы скачать её.",
                 "avatarId" to userAvatar
             )
             FirebaseDatabase.getInstance()
                 .getReference("notificationRequests/$targetUserNickname")
                 .push()
                 .setValue(notificationData)
+
+            // 1. Отправляем карточку колоды в chat_inbox получателя
+            val deckMessageText = "DECK:::$deckName:::${cards.size}"
+            val newMessage = mapOf(
+                "text" to deckMessageText,
+                "timestamp" to System.currentTimeMillis()
+            )
+            FirebaseDatabase.getInstance().getReference("chat_inbox/$targetUserNickname/$myNickname")
+                .push().setValue(newMessage)
+
+            // 2. Сохраняем карточку колоды в историю своего чата
+            val myHistory = loadChatHistory(context, targetUserNickname).toMutableList()
+            myHistory.add(ChatMessage(deckMessageText, isFromMe = true))
+            saveChatHistory(context, targetUserNickname, myHistory)
                 
             onSuccess()
         }
         .addOnFailureListener { error ->
             onFailure(error.message ?: "Не удалось отправить колоду")
+        }
+}
+
+fun downloadSpecificSharedDeck(
+    context: Context,
+    deckName: String,
+    onSuccess: (String) -> Unit,
+    onFailure: (String) -> Unit
+) {
+    val nickname = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
+        .getString(NICKNAME_KEY, null) ?: return
+        
+    val safeDeckName = deckName.replace(Regex("[^A-Za-z0-9А-Яа-яёЁ._-]"), "_")
+    val fileName = "$safeDeckName.csv"
+    val storageRef = FirebaseStorage.getInstance().reference.child("decks/$nickname/$fileName")
+    
+    storageRef.getBytes(10L * 1024L * 1024L)
+        .addOnSuccessListener { bytes ->
+            val cards = parseFlashcardsFromCsv(bytes)
+            storageRef.delete().addOnCompleteListener {
+                decrementAvailableDeckCount(nickname)
+                if (cards.isNotEmpty()) {
+                    val currentBlocks = (loadBlocksFromStorage(context) ?: emptyList()).toMutableList()
+                    val existingIndex = currentBlocks.indexOfFirst { it.name.equals(deckName, ignoreCase = true) }
+                    if (existingIndex >= 0) {
+                        currentBlocks[existingIndex] = FlashcardBlock(deckName, cards)
+                    } else {
+                        currentBlocks.add(FlashcardBlock(deckName, cards))
+                    }
+                    saveBlocksToStorage(context, currentBlocks)
+                    onSuccess(deckName)
+                } else {
+                    onFailure("Файл колоды пуст")
+                }
+            }
+        }
+        .addOnFailureListener {
+            val currentBlocks = loadBlocksFromStorage(context) ?: emptyList()
+            if (currentBlocks.any { it.name.equals(deckName, ignoreCase = true) }) {
+                onSuccess("$deckName (уже в ваших колодах)")
+            } else {
+                onFailure("Колода недоступна для скачивания")
+            }
         }
 }
 
