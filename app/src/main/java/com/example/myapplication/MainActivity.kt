@@ -1541,7 +1541,7 @@ fun FriendsDialog(
                                                 FirebaseDatabase.getInstance()
                                                     .getReference("notificationRequests/$target")
                                                     .push()
-                                                    .setValue("Пользователь $currentNickname хочет добавить вас в друзья!")
+                                                    .setValue("Новая заявка:::Пользователь $currentNickname хочет добавить вас в друзья!")
                                                     
                                                 statusMessage = "Запрос отправлен!"
                                                 friendIdInput = ""
@@ -1594,7 +1594,7 @@ fun FriendsDialog(
                                                 // Уведомляем отправителя, что мы приняли его заявку
                                                 db.getReference("notificationRequests/$sender")
                                                     .push()
-                                                    .setValue("Пользователь $currentNickname принял вашу заявку в друзья!")
+                                                    .setValue("Заявка принята:::Пользователь $currentNickname принял вашу заявку в друзья!")
                                             }) {
                                                 Icon(Icons.Filled.Check, contentDescription = "Принять", tint = Color(0xFF2E7D32))
                                             }
@@ -2007,7 +2007,7 @@ fun ChatDetailScreen(
                             // Также отправляем как уведомление (существующая логика), 
                             // но добавим имя отправителя, чтобы было понятно от кого
                             FirebaseDatabase.getInstance().getReference("notificationRequests/$recipient")
-                                .push().setValue("Новое сообщение от $currentNickname: $messageText")
+                                .push().setValue("$currentNickname:::$messageText")
                                 
                             messageText = ""
                         }
@@ -4005,7 +4005,7 @@ fun sendDeckToUser(
             FirebaseDatabase.getInstance()
                 .getReference("notificationRequests/$targetUserNickname")
                 .push()
-                .setValue("Пользователь $myNickname отправил вам колоду «$deckName». Откройте «Из облака», чтобы скачать её.")
+                .setValue("Новая колода:::Пользователь $myNickname отправил вам колоду «$deckName». Откройте «Из облака», чтобы скачать её.")
                 
             onSuccess()
         }

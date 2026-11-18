@@ -19,7 +19,7 @@ class FirebaseMessagingService : FcmService() {
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
-        val title = message.notification?.title ?: "Сообщение от разработчика"
+        val title = message.notification?.title ?: "CatCards"
         val body = message.notification?.body ?: message.data["message"] ?: return
         showAdminMessageNotification(this, body, title)
     }

@@ -84,12 +84,21 @@ exports.sendNotification = onValueCreated("/notificationRequests/{nickname}/{req
     return;
   }
 
+  // Parse custom title if formatted as "TITLE:::BODY"
+  let title = "Уведомление CatCards";
+  let body = request;
+  if (request.includes(":::")) {
+    const parts = request.split(":::");
+    title = parts[0];
+    body = parts.slice(1).join(":::");
+  }
+
   try {
     await admin.messaging().send({
       token,
       notification: {
-        title: "Сообщение от разработчика",
-        body: request
+        title: title,
+        body: body
       },
       android: {
         priority: "high",
@@ -101,7 +110,7 @@ exports.sendNotification = onValueCreated("/notificationRequests/{nickname}/{req
           notificationPriority: "PRIORITY_HIGH"
         }
       },
-      data: { message: request }
+      data: { message: body }
     });
     console.log(`Notification sent to ${nickname}`);
     await event.data.ref.remove();
