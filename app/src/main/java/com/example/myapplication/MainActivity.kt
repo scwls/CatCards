@@ -96,6 +96,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.draw.clip
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -168,9 +169,16 @@ import com.google.firebase.auth.AuthResult
 import java.nio.charset.StandardCharsets
 import android.util.Log
 import android.util.Patterns
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.ScrollState
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.key
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.Dp
+import androidx.core.app.Person
+import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.IconCompat
 import com.google.android.gms.tasks.Task
 import com.google.firebase.database.DatabaseReference
 import java.io.Serializable
@@ -341,7 +349,7 @@ object XpSystem {
 
 enum class MainTab { PROFILE, DECKS, SETTINGS, CHAT }
 
-data class UserActivity(val learned: Long, val wrong: Long, val avatar: String = "🐱")
+data class UserActivity(val learned: Long, val wrong: Long, val avatar: String = "img")
 
 fun incrementWrongToday(context: Context) {
     val prefs = context.getSharedPreferences(STUDY_PREFS, Context.MODE_PRIVATE)
@@ -393,6 +401,29 @@ fun scheduleDailyAlarms(context: Context) {
     setAlarmForHour(20, 20)
 }
 
+@Composable
+fun AvatarImage(avatar: String, modifier: Modifier = Modifier, size: Dp = 24.dp) {
+    val context = LocalContext.current
+    val resId = remember(avatar) {
+        context.resources.getIdentifier(avatar, "drawable", context.packageName)
+    }
+    if (resId != 0) {
+        Image(
+            painter = painterResource(id = resId),
+            contentDescription = "Avatar",
+            contentScale = ContentScale.Crop,
+            modifier = modifier
+                .size(size)
+                .clip(CircleShape)
+        )
+    } else {
+        Text(
+            text = if (avatar.isNotBlank()) avatar else "🐱",
+            fontSize = (size.value * 0.7).sp
+        )
+    }
+}
+
 fun textToBitmap(text: String): Bitmap {
     val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = 100f
@@ -407,17 +438,35 @@ fun textToBitmap(text: String): Bitmap {
     return bitmap
 }
 
+fun getAvatarBitmap(context: Context, avatar: String): Bitmap {
+    val resId = context.resources.getIdentifier(avatar, "drawable", context.packageName)
+    if (resId != 0) {
+        val drawable = ContextCompat.getDrawable(context, resId)
+        if (drawable != null) {
+            val width = drawable.intrinsicWidth.coerceAtLeast(100)
+            val height = drawable.intrinsicHeight.coerceAtLeast(100)
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            drawable.setBounds(0, 0, canvas.width, canvas.height)
+            drawable.draw(canvas)
+            return bitmap
+        }
+    }
+    return textToBitmap(if (avatar.isNotBlank()) avatar else "img")
+}
+
 fun showAdminMessageNotification(
     context: Context,
     message: String,
     title: String = "CatCards",
-    avatar: String = "🐱"
+    avatar: String = "img"
 ) {
     val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    val channelId = "admin_msg_v2"
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         notificationManager.createNotificationChannel(
             NotificationChannel(
-                "admin_msg_v2",
+                channelId,
                 "Сообщения", 
                 NotificationManager.IMPORTANCE_HIGH
             )
@@ -427,14 +476,25 @@ fun showAdminMessageNotification(
     val pendingIntent = PendingIntent.getActivity(
         context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
-    val notification = NotificationCompat.Builder(context, "admin_msg_v2")
+
+    val avatarBitmap = getAvatarBitmap(context, avatar)
+    val userIcon = IconCompat.createWithBitmap(avatarBitmap)
+    
+    val senderPerson = Person.Builder()
+        .setName(title)
+        .setIcon(userIcon)
+        .build()
+
+    val messagingStyle = NotificationCompat.MessagingStyle(senderPerson)
+        .addMessage(message, System.currentTimeMillis(), senderPerson)
+
+    val notification = NotificationCompat.Builder(context, channelId)
         .setSmallIcon(R.drawable.ic_dialog_info)
-        .setLargeIcon(textToBitmap(avatar))
-        .setContentTitle(title)
-        .setContentText(message)
+        .setStyle(messagingStyle)
         .setContentIntent(pendingIntent)
         .setAutoCancel(true)
         .build()
+
     notificationManager.notify(System.currentTimeMillis().toInt(), notification)
 }
 
@@ -812,7 +872,7 @@ fun GuestProfileScreen(
     }
 
     var userDescription by remember { mutableStateOf("") }
-    var userAvatar by remember { mutableStateOf("🐱") }
+    var userAvatar by remember { mutableStateOf("img") }
     var userShortId by remember { mutableStateOf("") }
     var userLearned by remember { mutableStateOf(0L) }
     var userWrong by remember { mutableStateOf(0L) }
@@ -873,7 +933,7 @@ fun GuestProfileScreen(
                     .background(MaterialTheme.colorScheme.primaryContainer, shape = CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Text(userAvatar, fontSize = 48.sp)
+                AvatarImage(avatar = userAvatar, size = 96.dp)
             }
             
             Spacer(modifier = Modifier.height(16.dp))
@@ -1126,10 +1186,10 @@ fun ProfileScreen() {
         var description by remember { mutableStateOf(prefs.getString("user_description", "") ?: "") }
     var isEditingDescription by remember { mutableStateOf(false) }
     
-    var selectedAvatar by remember { mutableStateOf(prefs.getString("user_avatar", "🐱") ?: "🐱") }
+    var selectedAvatar by remember { mutableStateOf(prefs.getString("user_avatar", "img") ?: "img") }
     var showAvatarDialog by remember { mutableStateOf(false) }
     
-    val availableAvatars = listOf("🐱", "🐶", "🦊", "🐼", "🦁", "🐯", "🦉", "🐸", "🦄")
+    val availableAvatars = listOf("img", "img_1")
     
     val learnedToday = getLearnedToday(context)
     val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
@@ -1177,7 +1237,7 @@ fun ProfileScreen() {
                 .clickable { showAvatarDialog = true },
             contentAlignment = Alignment.Center
         ) {
-            Text(selectedAvatar, fontSize = 48.sp)
+            AvatarImage(avatar = selectedAvatar, size = 96.dp)
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -1333,7 +1393,7 @@ fun ProfileScreen() {
                                 },
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(avatar, fontSize = 32.sp)
+                            AvatarImage(avatar = avatar, size = 52.dp)
                         }
                     }
                 }
@@ -1498,7 +1558,7 @@ fun FriendsDialog(
                                             Box(
                                                 modifier = Modifier.size(40.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
                                                 contentAlignment = Alignment.Center
-                                            ) { Text(avatar, fontSize = 24.sp) }
+                                            ) { AvatarImage(avatar = avatar, size = 36.dp) }
                                             Spacer(Modifier.width(12.dp))
                                             Text(friendNick, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                                         }
@@ -1587,7 +1647,7 @@ fun FriendsDialog(
                                         Box(
                                             modifier = Modifier.size(40.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
                                             contentAlignment = Alignment.Center
-                                        ) { Text(searchResultAvatar ?: "🐱", fontSize = 24.sp) }
+                                        ) { AvatarImage(avatar = searchResultAvatar ?: "img", size = 36.dp) }
                                         Spacer(Modifier.width(12.dp))
                                         Text(searchResultNickname!!, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                                     }
@@ -1955,7 +2015,7 @@ fun ChatDetailScreen(
                         .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(recipientAvatar, fontSize = 24.sp)
+                    AvatarImage(avatar = recipientAvatar, size = 36.dp)
                 }
                 Spacer(Modifier.width(12.dp))
                 Text(
@@ -1984,7 +2044,7 @@ fun ChatDetailScreen(
                                 .clickable { onViewProfile() },
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(recipientAvatar, fontSize = 18.sp)
+                            AvatarImage(avatar = recipientAvatar, size = 28.dp)
                         }
                         Spacer(Modifier.width(8.dp))
                     }
@@ -2185,7 +2245,7 @@ fun ChatScreen() {
                                             .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text(activity.avatar, fontSize = 24.sp)
+                                        AvatarImage(avatar = activity.avatar, size = 36.dp)
                                     }
                                     Spacer(Modifier.width(12.dp))
                                     Text(user, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
