@@ -2448,40 +2448,6 @@ fun ComboAnimationOverlay(amount: Int, onDismiss: () -> Unit) {
 }
 
 @Composable
-fun FloatingXpAnimation(amount: Int, onDismiss: () -> Unit) {
-    var visible by remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) {
-        visible = true
-        delay(600)
-        visible = false
-        delay(300)
-        onDismiss()
-    }
-
-    AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn(tween(200)) + slideInVertically(initialOffsetY = { it }, animationSpec = tween(200)),
-        exit = fadeOut(tween(300)) + slideOutVertically(targetOffsetY = { -it }, animationSpec = tween(300)),
-        modifier = Modifier.fillMaxSize()
-    ) {
-        Box(
-            contentAlignment = Alignment.TopEnd,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(top = 96.dp, end = 32.dp)
-        ) {
-            Text(
-                text = "+$amount XP",
-                color = Color(0xFF81C784), // Светло-зеленый цвет для обычного опыта
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-        }
-    }
-}
-
-@Composable
 fun FlashcardApp(
     pinkTheme: Boolean,
     onThemeChange: (Boolean) -> Unit,
@@ -2506,7 +2472,9 @@ fun FlashcardApp(
     var availableCloudDecks by remember { mutableStateOf(0) }
     var currentTab by rememberSaveable { mutableStateOf(MainTab.DECKS) }
     var comboBonusToAnimate by remember { mutableStateOf<Int?>(null) }
-    var xpEventToAnimate by remember { mutableStateOf<Pair<Long, Int>?>(null) }
+    
+    val xpPrefs = context.getSharedPreferences("xp_prefs", Context.MODE_PRIVATE)
+    var currentSessionXp by remember { mutableStateOf(xpPrefs.getInt("total_xp", 0)) }
 
     // После переустановки восстанавливаем колоды из базы по авторизованному аккаунту.
     LaunchedEffect(Unit) {
@@ -2731,11 +2699,12 @@ fun FlashcardApp(
                     if (correct == true && card != null) incrementLearnedToday(context, card)
                     if (correct == false) incrementWrongToday(context)
                     if (correct != null && card != null) {
-                        val (baseXp, comboAwarded) = XpSystem.processCardStudiedForXp(context, card.front, "SWIPE", correct)
-                        if (baseXp > 0) xpEventToAnimate = System.currentTimeMillis() to baseXp
+                        val (_, comboAwarded) = XpSystem.processCardStudiedForXp(context, card.front, "SWIPE", correct)
+                        currentSessionXp = xpPrefs.getInt("total_xp", 0)
                         if (comboAwarded > 0) comboBonusToAnimate = comboAwarded
                     }
                 },
+                currentXp = currentSessionXp,
                 modifier = modifier
             )
         } else if (activeSession!!.mode == StudyMode.TILES) {
@@ -2749,11 +2718,12 @@ fun FlashcardApp(
                     if (correct == true && card != null) incrementLearnedToday(context, card)
                     if (correct == false) incrementWrongToday(context)
                     if (correct != null && card != null) {
-                        val (baseXp, comboAwarded) = XpSystem.processCardStudiedForXp(context, card.front, "TILES", correct)
-                        if (baseXp > 0) xpEventToAnimate = System.currentTimeMillis() to baseXp
+                        val (_, comboAwarded) = XpSystem.processCardStudiedForXp(context, card.front, "TILES", correct)
+                        currentSessionXp = xpPrefs.getInt("total_xp", 0)
                         if (comboAwarded > 0) comboBonusToAnimate = comboAwarded
                     }
                 },
+                currentXp = currentSessionXp,
                 modifier = modifier
             )
         } else {
@@ -2767,11 +2737,12 @@ fun FlashcardApp(
                     if (correct == true && card != null) incrementLearnedToday(context, card)
                     if (correct == false) incrementWrongToday(context)
                     if (correct != null && card != null) {
-                        val (baseXp, comboAwarded) = XpSystem.processCardStudiedForXp(context, card.front, "INPUT", correct)
-                        if (baseXp > 0) xpEventToAnimate = System.currentTimeMillis() to baseXp
+                        val (_, comboAwarded) = XpSystem.processCardStudiedForXp(context, card.front, "INPUT", correct)
+                        currentSessionXp = xpPrefs.getInt("total_xp", 0)
                         if (comboAwarded > 0) comboBonusToAnimate = comboAwarded
                     }
                 },
+                currentXp = currentSessionXp,
                 modifier = modifier
             )
         }
@@ -2893,15 +2864,6 @@ fun FlashcardApp(
             amount = amount,
             onDismiss = { comboBonusToAnimate = null }
         )
-    }
-
-    xpEventToAnimate?.let { event ->
-        key(event.first) {
-            FloatingXpAnimation(
-                amount = event.second,
-                onDismiss = { xpEventToAnimate = null }
-            )
-        }
     }
 }
 
@@ -3227,6 +3189,7 @@ fun FlashcardScreen(
     onBack: () -> Unit,
     onExportErrors: (List<Flashcard>, String, () -> Unit) -> Unit,
     onProgressChanged: (Boolean?, Flashcard?) -> Unit,
+    currentXp: Int,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -3239,9 +3202,11 @@ fun FlashcardScreen(
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
-            horizontalArrangement = Arrangement.Start
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Button(onClick = onBack) { Text("<- Назад") }
+            Text("🌟 $currentXp XP", fontWeight = FontWeight.Bold, color = Color(0xFFFFB300), style = MaterialTheme.typography.titleMedium)
         }
 
         Column(
@@ -3414,6 +3379,7 @@ fun TilesScreen(
     onBack: () -> Unit,
     onExportErrors: (List<Flashcard>, String, () -> Unit) -> Unit,
     onProgressChanged: (Boolean?, Flashcard?) -> Unit,
+    currentXp: Int,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -3425,8 +3391,9 @@ fun TilesScreen(
 
     Column(modifier = modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         if (!isLandscape) {
-            Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.Start) {
+            Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Button(onClick = onBack) { Text("<- Назад") }
+                Text("🌟 $currentXp XP", fontWeight = FontWeight.Bold, color = Color(0xFFFFB300), style = MaterialTheme.typography.titleMedium)
             }
         }
 
@@ -3487,6 +3454,7 @@ fun TilesScreen(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
+                    Text("🌟 $currentXp XP", fontWeight = FontWeight.Bold, color = Color(0xFFFFB300), style = MaterialTheme.typography.titleMedium)
                 }
             }
 
@@ -3673,6 +3641,7 @@ fun TypingScreen(
     onBack: () -> Unit,
     onExportErrors: (List<Flashcard>, String, () -> Unit) -> Unit,
     onProgressChanged: (Boolean?, Flashcard?) -> Unit,
+    currentXp: Int,
     modifier: Modifier = Modifier
 ) {
     var currentIndex by remember(session) { mutableStateOf(session.currentPosition) }
@@ -3684,8 +3653,9 @@ fun TypingScreen(
     var submitted by remember(currentIndex) { mutableStateOf(card?.isKnown != null) }
 
     Column(modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(Modifier.fillMaxWidth().padding(16.dp)) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Button(onClick = onBack) { Text("<- Назад") }
+            Text("🌟 $currentXp XP", fontWeight = FontWeight.Bold, color = Color(0xFFFFB300), style = MaterialTheme.typography.titleMedium)
         }
         if (card != null) {
             val prompt = if (isReverseMode) card.back else card.front
