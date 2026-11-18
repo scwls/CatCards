@@ -408,12 +408,17 @@ fun sendSmartNotification(
     targetNickname: String,
     notificationData: Map<String, Any>
 ) {
+    val currentNickname = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
+        .getString(NICKNAME_KEY, "") ?: ""
     val db = FirebaseDatabase.getInstance()
-    db.getReference("users/$targetNickname/is_online")
+    db.getReference("users/$targetNickname")
         .addListenerForSingleValueEvent(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val isOnline = snapshot.getValue(Boolean::class.java) ?: false
-                if (!isOnline) {
+                val isOnline = snapshot.child("is_online").getValue(Boolean::class.java) ?: false
+                val activeChatWith = snapshot.child("active_chat_with").getValue(String::class.java) ?: ""
+
+                // Отправляем пуш ТОЛЬКО если пользователь оффлайн И он сейчас не находится в диалоге с нами
+                if (!isOnline && activeChatWith != currentNickname) {
                     db.getReference("notificationRequests/$targetNickname")
                         .push()
                         .setValue(notificationData)
@@ -2064,7 +2069,21 @@ fun ChatDetailScreen(
     val currentNickname = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
         .getString(NICKNAME_KEY, null)
         
-    var recipientAvatar by remember { mutableStateOf("🐱") }
+    var recipientAvatar by remember { mutableStateOf("img") }
+
+    DisposableEffect(recipient, currentNickname) {
+        val nickname = currentNickname
+        if (!nickname.isNullOrBlank()) {
+            val chatRef = FirebaseDatabase.getInstance().getReference("users/$nickname/active_chat_with")
+            chatRef.setValue(recipient)
+            chatRef.onDisconnect().setValue("")
+        }
+        onDispose {
+            if (!currentNickname.isNullOrBlank()) {
+                FirebaseDatabase.getInstance().getReference("users/$currentNickname/active_chat_with").setValue("")
+            }
+        }
+    }
 
     LaunchedEffect(recipient) {
         FirebaseDatabase.getInstance().getReference("users/$recipient/avatar")
@@ -2950,16 +2969,27 @@ fun FlashcardApp(
                     val isDeck = text.startsWith("DECK:::")
                     val displayMsg = if (isDeck) "Отправил вам колоду 🎴" else text
 
-                    FirebaseDatabase.getInstance().getReference("users/$sender/avatar")
+                    FirebaseDatabase.getInstance().getReference("users/$nickname/active_chat_with")
                         .addListenerForSingleValueEvent(object : ValueEventListener {
-                            override fun onDataChange(avSnap: DataSnapshot) {
-                                val av = avSnap.getValue(String::class.java) ?: "img"
-                                activeInAppBanner = InAppBannerData(
-                                    title = sender,
-                                    message = displayMsg,
-                                    avatarId = av,
-                                    senderNickname = sender
-                                )
+                            override fun onDataChange(activeChatSnap: DataSnapshot) {
+                                val currentActiveChat = activeChatSnap.getValue(String::class.java) ?: ""
+                                if (currentActiveChat == sender) {
+                                    // Пользователь прямо сейчас в этом чате! Никаких баннеров не показываем!
+                                    return
+                                }
+                                FirebaseDatabase.getInstance().getReference("users/$sender/avatar")
+                                    .addListenerForSingleValueEvent(object : ValueEventListener {
+                                        override fun onDataChange(avSnap: DataSnapshot) {
+                                            val av = avSnap.getValue(String::class.java) ?: "img"
+                                            activeInAppBanner = InAppBannerData(
+                                                title = sender,
+                                                message = displayMsg,
+                                                avatarId = av,
+                                                senderNickname = sender
+                                            )
+                                        }
+                                        override fun onCancelled(error: DatabaseError) {}
+                                    })
                             }
                             override fun onCancelled(error: DatabaseError) {}
                         })
