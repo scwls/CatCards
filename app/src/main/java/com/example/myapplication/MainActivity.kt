@@ -474,8 +474,8 @@ fun InAppNotificationBanner(
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
-                        // Порог увеличен до 1/2 ширины экрана (очень тугое, как системное уведомление)
-                        if (abs(offsetX) > size.width / 2f) {
+                        // Понизил порог до 1/3 ширины экрана или 200 пикселей (золотая середина)
+                        if (abs(offsetX) > size.width / 3f || abs(offsetX) > 200f) {
                             // Берем размер экрана с хорошим запасом, чтобы баннер гарантированно улетел за края
                             val targetOffset = if (offsetX > 0) size.width.toFloat() * 1.5f else -size.width.toFloat() * 1.5f
                             coroutineScope.launch {
