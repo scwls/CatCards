@@ -1,0 +1,15 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // В папке decks (колоды, которые мы отправляем)
+    match /decks/{nickname}/{allPaths=**} {
+      // Читать и записывать файлы могут только авторизованные пользователи
+      allow read, write: if request.auth != null;
+    }
+
+    // В папке error_reports (ошибки, которые отправляются разработчику)
+    match /error_reports/{nickname}/{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
