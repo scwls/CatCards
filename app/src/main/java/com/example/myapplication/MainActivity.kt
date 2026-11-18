@@ -1910,6 +1910,10 @@ fun SettingsScreen(
 
 data class ChatMessage(val text: String, val isFromMe: Boolean, val timestamp: Long = System.currentTimeMillis()) : Serializable
 
+fun formatMessageTime(timestamp: Long): String {
+    return SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timestamp))
+}
+
 fun saveChatHistory(context: Context, partner: String, messages: List<ChatMessage>) {
     try {
         val file = File(context.filesDir, "chat_${partner}.dat")
@@ -1975,8 +1979,9 @@ fun ChatDetailScreen(
             listener = object : ChildEventListener {
                 override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
                     val text = snapshot.child("text").getValue(String::class.java)
+                    val ts = snapshot.child("timestamp").getValue(Long::class.java) ?: System.currentTimeMillis()
                     if (text != null) {
-                        messages.add(ChatMessage(text, isFromMe = false))
+                        messages.add(ChatMessage(text, isFromMe = false, timestamp = ts))
                         saveChatHistory(context, recipient, messages)
                         snapshot.ref.removeValue() // Удаляем из облака после получения
                     }
@@ -2043,7 +2048,16 @@ fun ChatDetailScreen(
                         ),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text(msg.text, modifier = Modifier.padding(12.dp))
+                        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                            Text(msg.text)
+                            Text(
+                                text = formatMessageTime(msg.timestamp),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                modifier = Modifier.align(Alignment.End).padding(top = 2.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -2117,6 +2131,7 @@ fun ChatScreen() {
     var usersError by remember { mutableStateOf<String?>(null) }
     var selectedChatUser by remember { mutableStateOf<String?>(null) }
     var profileToView by remember { mutableStateOf<String?>(null) }
+    var inboxSnapshot by remember { mutableStateOf<DataSnapshot?>(null) }
     
     BackHandler(enabled = profileToView != null) {
         profileToView = null
@@ -2129,6 +2144,26 @@ fun ChatScreen() {
     val context = LocalContext.current
     val currentNickname = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
         .getString(NICKNAME_KEY, null)
+        
+    DisposableEffect(currentNickname) {
+        var inboxRef: DatabaseReference? = null
+        var listener: ValueEventListener? = null
+        if (!currentNickname.isNullOrBlank()) {
+            inboxRef = FirebaseDatabase.getInstance().getReference("chat_inbox/$currentNickname")
+            listener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    inboxSnapshot = snapshot
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            }
+            inboxRef.addValueEventListener(listener!!)
+        }
+        onDispose {
+            if (inboxRef != null && listener != null) {
+                inboxRef!!.removeEventListener(listener!!)
+            }
+        }
+    }
         
     LaunchedEffect(currentNickname) {
         if (currentNickname == null) return@LaunchedEffect
@@ -2214,6 +2249,13 @@ fun ChatScreen() {
             } else {
                 LazyColumn(modifier = Modifier.weight(1f)) {
                     items(users.toList()) { (user, activity) ->
+                        val friendInbox = inboxSnapshot?.child(user)
+                        val unreadCount = friendInbox?.childrenCount?.toInt() ?: 0
+
+                        val unreadLastTs = friendInbox?.children?.mapNotNull { it.child("timestamp").getValue(Long::class.java) }?.maxOrNull()
+                        val localLastTs = remember(user, inboxSnapshot) { loadChatHistory(context, user).lastOrNull()?.timestamp }
+                        val displayTime = listOfNotNull(unreadLastTs, localLastTs).maxOrNull()
+
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -2239,8 +2281,30 @@ fun ChatScreen() {
                                     Text(user, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                                 }
                                 
-                                IconButton(onClick = { selectedChatUser = user }) {
-                                    Text("💬", fontSize = 18.sp)
+                                Column(horizontalAlignment = Alignment.End) {
+                                    if (displayTime != null && displayTime > 0) {
+                                        Text(
+                                            text = formatMessageTime(displayTime),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color.Gray,
+                                            modifier = Modifier.padding(bottom = 4.dp)
+                                        )
+                                    }
+                                    if (unreadCount > 0) {
+                                        Box(
+                                            modifier = Modifier
+                                                .background(MaterialTheme.colorScheme.primary, CircleShape)
+                                                .padding(horizontal = 8.dp, vertical = 2.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = unreadCount.toString(),
+                                                color = MaterialTheme.colorScheme.onPrimary,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
