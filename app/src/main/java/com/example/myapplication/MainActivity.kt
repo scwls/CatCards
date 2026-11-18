@@ -2355,12 +2355,24 @@ fun ChatDetailScreen(
 }
 
 @Composable
-fun ChatScreen(blocks: MutableList<FlashcardBlock>) {
+fun ChatScreen(
+    blocks: MutableList<FlashcardBlock>,
+    directChatToOpen: String?,
+    onDirectChatHandled: () -> Unit
+) {
     var users by remember { mutableStateOf<Map<String, UserActivity>>(emptyMap()) }
     var usersError by remember { mutableStateOf<String?>(null) }
-    var selectedChatUser by remember { mutableStateOf<String?>(null) }
+    var selectedChatUser by remember { mutableStateOf<String?>(directChatToOpen) }
     var profileToView by remember { mutableStateOf<String?>(null) }
     var inboxSnapshot by remember { mutableStateOf<DataSnapshot?>(null) }
+    
+    // Если пришел запрос на прямое открытие, обрабатываем его
+    LaunchedEffect(directChatToOpen) {
+        if (directChatToOpen != null) {
+            selectedChatUser = directChatToOpen
+            onDirectChatHandled()
+        }
+    }
     
     BackHandler(enabled = profileToView != null) {
         profileToView = null
@@ -2876,6 +2888,7 @@ fun FlashcardApp(
     var comboBonusToAnimate by remember { mutableStateOf<Int?>(null) }
     var hasUnreadChatMessages by remember { mutableStateOf(false) }
     var activeInAppBanner by remember { mutableStateOf<InAppBannerData?>(null) }
+    var directChatToOpen by remember { mutableStateOf<String?>(null) }
     
     val xpPrefs = context.getSharedPreferences("xp_prefs", Context.MODE_PRIVATE)
     var currentSessionXp by remember { mutableStateOf(xpPrefs.getInt("total_xp", 0)) }
@@ -3222,7 +3235,13 @@ fun FlashcardApp(
                             onThemeChange = onThemeChange
                         )
                     }
-                    MainTab.CHAT -> ChatScreen(blocks = blocks)
+                    MainTab.CHAT -> {
+                        ChatScreen(
+                            blocks = blocks,
+                            directChatToOpen = directChatToOpen,
+                            onDirectChatHandled = { directChatToOpen = null }
+                        )
+                    }
                 }
             }
         }
@@ -3411,6 +3430,7 @@ fun FlashcardApp(
             onClick = {
                 activeSession = null
                 currentTab = MainTab.CHAT
+                directChatToOpen = banner.senderNickname // Передаем состояние в ChatScreen
             },
             onDismiss = { activeInAppBanner = null }
         )
