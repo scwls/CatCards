@@ -465,7 +465,8 @@ fun InAppNotificationBanner(
     AnimatedVisibility(
         visible = visible,
         enter = fadeIn(tween(300)) + slideInVertically(initialOffsetY = { -it }),
-        exit = fadeOut(tween(300)) + slideOutVertically(targetOffsetY = { -it }),
+        // Убрали анимацию выезда наверх при закрытии, так как баннер уже улетел вбок
+        exit = fadeOut(tween(150)),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp)
@@ -473,14 +474,15 @@ fun InAppNotificationBanner(
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
-                        // Очень чувствительный порог: достаточно сдвинуть на 50 пикселей
-                        if (abs(offsetX) > 50f) {
-                            val targetOffset = if (offsetX > 0) size.width.toFloat() else -size.width.toFloat()
+                        // Порог немного увеличен до 100 пикселей (чтобы не было случайных смахиваний)
+                        if (abs(offsetX) > 100f) {
+                            // Берем размер экрана с хорошим запасом, чтобы баннер гарантированно улетел за края
+                            val targetOffset = if (offsetX > 0) size.width.toFloat() * 1.5f else -size.width.toFloat() * 1.5f
                             coroutineScope.launch {
-                                // Анимируем вылет за пределы экрана, а уже потом скрываем
-                                animateSwipeOffset(offsetX, targetOffset, 150) { offsetX = it }
+                                // Анимируем вылет баннера за край экрана за 200мс
+                                animateSwipeOffset(offsetX, targetOffset, 200) { offsetX = it }
                                 visible = false
-                                delay(100) // Ждем завершения анимации исчезновения (exit = fadeOut)
+                                delay(50) // Небольшая задержка перед полным уничтожением компонента
                                 onDismiss()
                             }
                         } else {
