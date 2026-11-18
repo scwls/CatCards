@@ -2074,17 +2074,27 @@ fun ChatDetailScreen(
         
     var recipientAvatar by remember { mutableStateOf("img") }
 
-    DisposableEffect(recipient, currentNickname) {
-        val nickname = currentNickname
-        if (!nickname.isNullOrBlank()) {
-            val chatRef = FirebaseDatabase.getInstance().getReference("users/$nickname/active_chat_with")
-            chatRef.setValue(recipient)
-            chatRef.onDisconnect().setValue("")
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, recipient, currentNickname) {
+        var chatRef: DatabaseReference? = null
+        if (!currentNickname.isNullOrBlank()) {
+            chatRef = FirebaseDatabase.getInstance().getReference("users/$currentNickname/active_chat_with")
         }
-        onDispose {
-            if (!currentNickname.isNullOrBlank()) {
-                FirebaseDatabase.getInstance().getReference("users/$currentNickname/active_chat_with").setValue("")
+
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME || event == Lifecycle.Event.ON_START) {
+                chatRef?.setValue(recipient)
+                chatRef?.onDisconnect()?.setValue("")
+            } else if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                chatRef?.setValue("")
             }
+        }
+        
+        lifecycleOwner.lifecycle.addObserver(observer)
+        
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            chatRef?.setValue("")
         }
     }
 
