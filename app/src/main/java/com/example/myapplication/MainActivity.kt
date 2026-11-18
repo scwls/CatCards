@@ -473,10 +473,11 @@ fun InAppNotificationBanner(
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
-                        if (abs(offsetX) > size.width / 3) {
+                        // Порог смахивания уменьшен с 1/3 до 1/5 ширины экрана (или до 150 пикселей)
+                        if (abs(offsetX) > size.width / 5 || abs(offsetX) > 150f) {
                             visible = false
                             coroutineScope.launch {
-                                delay(300)
+                                delay(200)
                                 onDismiss()
                             }
                         } else {
