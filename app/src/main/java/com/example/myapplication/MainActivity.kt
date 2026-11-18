@@ -2592,6 +2592,7 @@ fun FlashcardApp(
     var availableCloudDecks by remember { mutableStateOf(0) }
     var currentTab by rememberSaveable { mutableStateOf(MainTab.DECKS) }
     var comboBonusToAnimate by remember { mutableStateOf<Int?>(null) }
+    var hasUnreadChatMessages by remember { mutableStateOf(false) }
     
     val xpPrefs = context.getSharedPreferences("xp_prefs", Context.MODE_PRIVATE)
     var currentSessionXp by remember { mutableStateOf(xpPrefs.getInt("total_xp", 0)) }
@@ -2668,6 +2669,31 @@ fun FlashcardApp(
         onDispose {
             if (decksRef != null && listener != null) {
                 decksRef!!.removeEventListener(listener!!)
+            }
+        }
+    }
+
+    DisposableEffect(nickname) {
+        var inboxRef: DatabaseReference? = null
+        var listener: ValueEventListener? = null
+        if (!nickname.isNullOrBlank()) {
+            inboxRef = FirebaseDatabase.getInstance().getReference("chat_inbox/$nickname")
+            listener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    var totalUnread = 0L
+                    for (senderSnap in snapshot.children) {
+                        totalUnread += senderSnap.childrenCount
+                    }
+                    hasUnreadChatMessages = totalUnread > 0
+                }
+
+                override fun onCancelled(error: DatabaseError) {}
+            }
+            inboxRef.addValueEventListener(listener!!)
+        }
+        onDispose {
+            if (inboxRef != null && listener != null) {
+                inboxRef!!.removeEventListener(listener!!)
             }
         }
     }
@@ -2764,7 +2790,19 @@ fun FlashcardApp(
                     NavigationBarItem(
                         selected = currentTab == MainTab.CHAT,
                         onClick = { currentTab = MainTab.CHAT },
-                        icon = { Icon(Icons.Filled.Email, contentDescription = "Чат") },
+                        icon = {
+                            Box {
+                                Icon(Icons.Filled.Email, contentDescription = "Чат")
+                                if (hasUnreadChatMessages) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .background(Color.Red, CircleShape)
+                                            .align(Alignment.TopEnd)
+                                    )
+                                }
+                            }
+                        },
                         label = { Text("Чат") }
                     )
                 }
