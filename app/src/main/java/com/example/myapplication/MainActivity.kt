@@ -167,6 +167,7 @@ import android.util.Log
 import android.util.Patterns
 import androidx.compose.foundation.ScrollState
 import androidx.compose.material3.IconButton
+import androidx.compose.runtime.key
 import com.google.android.gms.tasks.Task
 import com.google.firebase.database.DatabaseReference
 import java.io.Serializable
@@ -210,41 +211,56 @@ object XpSystem {
 
     private var comboCounter = 0
 
-    fun processCardStudiedForXp(context: Context, cardText: String, mode: String, isCorrect: Boolean): Int {
+    fun processCardStudiedForXp(context: Context, cardText: String, mode: String, isCorrect: Boolean): Pair<Int, Int> {
         val today = getTodayString()
         val prefs = context.getSharedPreferences(XP_PREFS, Context.MODE_PRIVATE)
+        val todayPrefs = context.getSharedPreferences("xp_today_prefs", Context.MODE_PRIVATE)
         val lastTrackingDate = prefs.getString("last_study_date_tracking", "")
         
         if (today != lastTrackingDate) {
+            // Очищаем историю ошибок и наград, так как начался новый день
+            todayPrefs.edit().clear().apply()
             prefs.edit()
                 .putString("last_study_date_tracking", today)
                 .putInt(CARDS_STUDIED_TODAY_QUEST, 0)
-                .remove("awarded_cards_today")
                 .apply()
         }
 
         var awardedComboBonus = 0
+        var awardedBaseXp = 0
+        val cardHash = "${cardText.hashCode()}_$mode"
+        
         if (isCorrect) {
             comboCounter++
             if (comboCounter > 0 && comboCounter % 10 == 0) {
-                awardedComboBonus = 10
+                awardedComboBonus = 20
                 awardXp(context, awardedComboBonus)
             }
 
-            val awardedCardsSet = prefs.getStringSet("awarded_cards_today", mutableSetOf())?.toMutableSet() ?: mutableSetOf()
-            val cardHash = "${cardText.hashCode()}_$mode"
+            val alreadyAwarded = todayPrefs.getBoolean("awarded_$cardHash", false)
 
-            if (!awardedCardsSet.contains(cardHash)) {
-                awardedCardsSet.add(cardHash)
-                prefs.edit().putStringSet("awarded_cards_today", awardedCardsSet).apply()
+            if (!alreadyAwarded) {
+                todayPrefs.edit().putBoolean("awarded_$cardHash", true).apply()
 
+                val mistakes = todayPrefs.getInt("mistakes_$cardHash", 0)
+                
                 val baseXP = when (mode.uppercase(Locale.US)) {
-                    "SWIPE" -> 1
-                    "TILES" -> 2
-                    "INPUT" -> 5
-                    else -> 1
+                    "SWIPE" -> 2
+                    "TILES" -> 4
+                    "INPUT" -> 10
+                    else -> 2
                 }
-                awardXp(context, baseXP)
+                
+                val finalXP = when (mistakes) {
+                    0 -> baseXP
+                    1 -> baseXP / 2 // Половина опыта, если была одна ошибка
+                    else -> 0       // 0 опыта, если было 2 и более ошибок
+                }
+
+                if (finalXP > 0) {
+                    awardXp(context, finalXP)
+                    awardedBaseXp = finalXP
+                }
 
                 val currentQuestCount = prefs.getInt(CARDS_STUDIED_TODAY_QUEST, 0)
                 if (currentQuestCount < DAILY_QUEST_TARGET) {
@@ -258,8 +274,10 @@ object XpSystem {
             }
         } else {
             comboCounter = 0
+            val currentMistakes = todayPrefs.getInt("mistakes_$cardHash", 0)
+            todayPrefs.edit().putInt("mistakes_$cardHash", currentMistakes + 1).apply()
         }
-        return awardedComboBonus
+        return Pair(awardedBaseXp, awardedComboBonus)
     }
 
     private fun processStreakLogic(context: Context) {
@@ -292,15 +310,15 @@ object XpSystem {
         }
         
         val streakBonus = when {
-            streak == 1 -> 10
+            streak == 1 -> 20
             streak == 2 -> 0
-            streak == 3 -> 25
-            streak == 5 -> 40
-            streak == 10 -> 75
-            streak % 30 == 0 -> 150
-            streak == 365 -> 500
-            streak == 730 -> 1000
-            else -> 5
+            streak == 3 -> 50
+            streak == 5 -> 80
+            streak == 10 -> 150
+            streak % 30 == 0 -> 300
+            streak == 365 -> 1000
+            streak == 730 -> 2000
+            else -> 10
         }
         
         if (streakBonus > 0) {
@@ -309,12 +327,12 @@ object XpSystem {
     }
 
     fun getLevel(xp: Int): Int {
-        return floor(sqrt(xp / 10.0)).toInt() + 1
+        return floor(sqrt(xp / 20.0)).toInt() + 1
     }
 
     fun getXpForLevel(level: Int): Int {
         val base = level - 1
-        return base * base * 10
+        return base * base * 20
     }
 }
 
@@ -2430,6 +2448,40 @@ fun ComboAnimationOverlay(amount: Int, onDismiss: () -> Unit) {
 }
 
 @Composable
+fun FloatingXpAnimation(amount: Int, onDismiss: () -> Unit) {
+    var visible by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        visible = true
+        delay(600)
+        visible = false
+        delay(300)
+        onDismiss()
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(200)) + slideInVertically(initialOffsetY = { it }, animationSpec = tween(200)),
+        exit = fadeOut(tween(300)) + slideOutVertically(targetOffsetY = { -it }, animationSpec = tween(300)),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Box(
+            contentAlignment = Alignment.TopEnd,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 96.dp, end = 32.dp)
+        ) {
+            Text(
+                text = "+$amount XP",
+                color = Color(0xFF81C784), // Светло-зеленый цвет для обычного опыта
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
 fun FlashcardApp(
     pinkTheme: Boolean,
     onThemeChange: (Boolean) -> Unit,
@@ -2454,6 +2506,7 @@ fun FlashcardApp(
     var availableCloudDecks by remember { mutableStateOf(0) }
     var currentTab by rememberSaveable { mutableStateOf(MainTab.DECKS) }
     var comboBonusToAnimate by remember { mutableStateOf<Int?>(null) }
+    var xpEventToAnimate by remember { mutableStateOf<Pair<Long, Int>?>(null) }
 
     // После переустановки восстанавливаем колоды из базы по авторизованному аккаунту.
     LaunchedEffect(Unit) {
@@ -2678,7 +2731,8 @@ fun FlashcardApp(
                     if (correct == true && card != null) incrementLearnedToday(context, card)
                     if (correct == false) incrementWrongToday(context)
                     if (correct != null && card != null) {
-                        val comboAwarded = XpSystem.processCardStudiedForXp(context, card.front, "SWIPE", correct)
+                        val (baseXp, comboAwarded) = XpSystem.processCardStudiedForXp(context, card.front, "SWIPE", correct)
+                        if (baseXp > 0) xpEventToAnimate = System.currentTimeMillis() to baseXp
                         if (comboAwarded > 0) comboBonusToAnimate = comboAwarded
                     }
                 },
@@ -2695,7 +2749,8 @@ fun FlashcardApp(
                     if (correct == true && card != null) incrementLearnedToday(context, card)
                     if (correct == false) incrementWrongToday(context)
                     if (correct != null && card != null) {
-                        val comboAwarded = XpSystem.processCardStudiedForXp(context, card.front, "TILES", correct)
+                        val (baseXp, comboAwarded) = XpSystem.processCardStudiedForXp(context, card.front, "TILES", correct)
+                        if (baseXp > 0) xpEventToAnimate = System.currentTimeMillis() to baseXp
                         if (comboAwarded > 0) comboBonusToAnimate = comboAwarded
                     }
                 },
@@ -2712,7 +2767,8 @@ fun FlashcardApp(
                     if (correct == true && card != null) incrementLearnedToday(context, card)
                     if (correct == false) incrementWrongToday(context)
                     if (correct != null && card != null) {
-                        val comboAwarded = XpSystem.processCardStudiedForXp(context, card.front, "INPUT", correct)
+                        val (baseXp, comboAwarded) = XpSystem.processCardStudiedForXp(context, card.front, "INPUT", correct)
+                        if (baseXp > 0) xpEventToAnimate = System.currentTimeMillis() to baseXp
                         if (comboAwarded > 0) comboBonusToAnimate = comboAwarded
                     }
                 },
@@ -2837,6 +2893,15 @@ fun FlashcardApp(
             amount = amount,
             onDismiss = { comboBonusToAnimate = null }
         )
+    }
+
+    xpEventToAnimate?.let { event ->
+        key(event.first) {
+            FloatingXpAnimation(
+                amount = event.second,
+                onDismiss = { xpEventToAnimate = null }
+            )
+        }
     }
 }
 
