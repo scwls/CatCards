@@ -479,15 +479,16 @@ fun InAppNotificationBanner(
                             // Берем размер экрана с хорошим запасом, чтобы баннер гарантированно улетел за края
                             val targetOffset = if (offsetX > 0) size.width.toFloat() * 1.5f else -size.width.toFloat() * 1.5f
                             coroutineScope.launch {
-                                // Анимируем вылет баннера за край экрана
-                                animateSwipeOffset(offsetX, targetOffset, 200) { offsetX = it }
+                                // Замедляем анимацию смахивания с 200мс до 350мс
+                                animateSwipeOffset(offsetX, targetOffset, 350) { offsetX = it }
                                 visible = false
-                                delay(50) // Небольшая задержка перед полным уничтожением компонента
+                                delay(50)
                                 onDismiss()
                             }
                         } else {
                             coroutineScope.launch {
-                                animateSwipeOffset(offsetX, 0f, 150) { offsetX = it }
+                                // Возврат на место тоже делаем чуть более плавным (с 150мс до 250мс)
+                                animateSwipeOffset(offsetX, 0f, 250) { offsetX = it }
                             }
                         }
                     },
