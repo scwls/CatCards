@@ -1538,10 +1538,13 @@ fun FriendsDialog(
                                         FirebaseDatabase.getInstance().getReference("friend_requests/$target/$currentNickname").setValue(true)
                                             .addOnSuccessListener {
                                                 // Отправляем пуш-уведомление пользователю
+                                                // Игнорируем ошибку, используем стандартную аватарку, 
+                                                // так как внутри LaunchedEffect не всегда есть доступ к context
+                                                val userAvatar = "🐱"
                                                 FirebaseDatabase.getInstance()
                                                     .getReference("notificationRequests/$target")
                                                     .push()
-                                                    .setValue("Новая заявка:::Пользователь $currentNickname хочет добавить вас в друзья!")
+                                                    .setValue("Новая заявка:::Пользователь $currentNickname хочет добавить вас в друзья!:::$userAvatar")
                                                     
                                                 statusMessage = "Запрос отправлен!"
                                                 friendIdInput = ""
@@ -1592,9 +1595,10 @@ fun FriendsDialog(
                                                 db.getReference("friend_requests/$currentNickname/$sender").removeValue()
                                                 
                                                 // Уведомляем отправителя, что мы приняли его заявку
+                                                val userAvatar = "🐱" // Аналогично, упрощаем до дефолтной аватарки в этом скоупе
                                                 db.getReference("notificationRequests/$sender")
                                                     .push()
-                                                    .setValue("Заявка принята:::Пользователь $currentNickname принял вашу заявку в друзья!")
+                                                    .setValue("Заявка принята:::Пользователь $currentNickname принял вашу заявку в друзья!:::$userAvatar")
                                             }) {
                                                 Icon(Icons.Filled.Check, contentDescription = "Принять", tint = Color(0xFF2E7D32))
                                             }
@@ -2006,8 +2010,9 @@ fun ChatDetailScreen(
                                 
                             // Также отправляем как уведомление (существующая логика), 
                             // но добавим имя отправителя, чтобы было понятно от кого
+                            val userAvatar = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE).getString("user_avatar", "🐱") ?: "🐱"
                             FirebaseDatabase.getInstance().getReference("notificationRequests/$recipient")
-                                .push().setValue("$currentNickname:::$messageText")
+                                .push().setValue("$currentNickname:::$messageText:::$userAvatar")
                                 
                             messageText = ""
                         }
@@ -4002,10 +4007,11 @@ fun sendDeckToUser(
                     ) = Unit
                 })
                 
+            val userAvatar = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE).getString("user_avatar", "🐱") ?: "🐱"
             FirebaseDatabase.getInstance()
                 .getReference("notificationRequests/$targetUserNickname")
                 .push()
-                .setValue("Новая колода:::Пользователь $myNickname отправил вам колоду «$deckName». Откройте «Из облака», чтобы скачать её.")
+                .setValue("Новая колода:::Пользователь $myNickname отправил вам колоду «$deckName». Откройте «Из облака», чтобы скачать её.:::$userAvatar")
                 
             onSuccess()
         }
