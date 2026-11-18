@@ -176,6 +176,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.runtime.key
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.core.app.Person
 import androidx.core.content.ContextCompat
@@ -400,6 +401,105 @@ fun scheduleDailyAlarms(context: Context) {
 
     setAlarmForHour(14, 14)
     setAlarmForHour(20, 20)
+}
+
+fun sendSmartNotification(
+    context: Context,
+    targetNickname: String,
+    notificationData: Map<String, Any>
+) {
+    val db = FirebaseDatabase.getInstance()
+    db.getReference("users/$targetNickname/is_online")
+        .addListenerForSingleValueEvent(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val isOnline = snapshot.getValue(Boolean::class.java) ?: false
+                if (!isOnline) {
+                    db.getReference("notificationRequests/$targetNickname")
+                        .push()
+                        .setValue(notificationData)
+                }
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                db.getReference("notificationRequests/$targetNickname")
+                    .push()
+                    .setValue(notificationData)
+            }
+        })
+}
+
+data class InAppBannerData(
+    val id: Long = System.currentTimeMillis(),
+    val title: String,
+    val message: String,
+    val avatarId: String,
+    val senderNickname: String
+)
+
+@Composable
+fun InAppNotificationBanner(
+    banner: InAppBannerData,
+    onClick: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var visible by remember { mutableStateOf(false) }
+
+    LaunchedEffect(banner.id) {
+        visible = true
+        delay(3500)
+        visible = false
+        delay(300)
+        onDismiss()
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(300)) + slideInVertically(initialOffsetY = { -it }),
+        exit = fadeOut(tween(300)) + slideOutVertically(targetOffsetY = { -it }),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    onDismiss()
+                    onClick()
+                },
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(MaterialTheme.colorScheme.surface, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AvatarImage(avatar = banner.avatarId, size = 40.dp)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = banner.title,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Text(
+                        text = banner.message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -1433,6 +1533,7 @@ fun FriendsDialog(
     onDismiss: () -> Unit,
     onFriendClick: (String) -> Unit = {}
 ) {
+    val context = LocalContext.current
     var currentTab by remember { mutableStateOf(0) } // 0 = Мои, 1 = Поиск, 2 = Запросы
     var friendIdInput by remember { mutableStateOf("") }
     var statusMessage by remember { mutableStateOf<String?>(null) }
@@ -1632,17 +1733,14 @@ fun FriendsDialog(
                                                 // Отправляем пуш-уведомление пользователю
                                                 // Игнорируем ошибку, используем стандартную аватарку, 
                                                 // так как внутри LaunchedEffect не всегда есть доступ к context
-                                                val userAvatar = "🐱"
+                                                val userAvatar = "img"
                                                 val notificationData = mapOf(
                                                     "action" to "FRIEND_REQUEST",
                                                     "sender" to currentNickname,
                                                     "message" to "Хочет добавить вас в друзья!",
                                                     "avatarId" to userAvatar
                                                 )
-                                                FirebaseDatabase.getInstance()
-                                                    .getReference("notificationRequests/$target")
-                                                    .push()
-                                                    .setValue(notificationData)
+                                                sendSmartNotification(context, target, notificationData)
                                                     
                                                 statusMessage = "Запрос отправлен!"
                                                 friendIdInput = ""
@@ -1693,16 +1791,14 @@ fun FriendsDialog(
                                                 db.getReference("friend_requests/$currentNickname/$sender").removeValue()
                                                 
                                                 // Уведомляем отправителя, что мы приняли его заявку
-                                                val userAvatar = "🐱" // Аналогично, упрощаем до дефолтной аватарки в этом скоупе
+                                                val userAvatar = "img"
                                                 val notificationData = mapOf(
                                                     "action" to "FRIEND_ACCEPT",
                                                     "sender" to currentNickname,
                                                     "message" to "Принял вашу заявку в друзья!",
                                                     "avatarId" to userAvatar
                                                 )
-                                                db.getReference("notificationRequests/$sender")
-                                                    .push()
-                                                    .setValue(notificationData)
+                                                sendSmartNotification(context, sender, notificationData)
                                             }) {
                                                 Icon(Icons.Filled.Check, contentDescription = "Принять", tint = Color(0xFF2E7D32))
                                             }
@@ -2204,8 +2300,7 @@ fun ChatDetailScreen(
                                 "message" to messageText,
                                 "avatarId" to userAvatar
                             )
-                            FirebaseDatabase.getInstance().getReference("notificationRequests/$recipient")
-                                .push().setValue(notificationData)
+                            sendSmartNotification(context, recipient, notificationData)
                                 
                             messageText = ""
                         }
@@ -2748,6 +2843,7 @@ fun FlashcardApp(
     var currentTab by rememberSaveable { mutableStateOf(MainTab.DECKS) }
     var comboBonusToAnimate by remember { mutableStateOf<Int?>(null) }
     var hasUnreadChatMessages by remember { mutableStateOf(false) }
+    var activeInAppBanner by remember { mutableStateOf<InAppBannerData?>(null) }
     
     val xpPrefs = context.getSharedPreferences("xp_prefs", Context.MODE_PRIVATE)
     var currentSessionXp by remember { mutableStateOf(xpPrefs.getInt("total_xp", 0)) }
@@ -2829,26 +2925,55 @@ fun FlashcardApp(
     }
 
     DisposableEffect(nickname) {
+        if (!nickname.isNullOrBlank()) {
+            val onlineRef = FirebaseDatabase.getInstance().getReference("users/$nickname/is_online")
+            onlineRef.setValue(true)
+            onlineRef.onDisconnect().setValue(false)
+        }
+        onDispose {
+            if (!nickname.isNullOrBlank()) {
+                FirebaseDatabase.getInstance().getReference("users/$nickname/is_online").setValue(false)
+            }
+        }
+    }
+
+    DisposableEffect(nickname) {
         var inboxRef: DatabaseReference? = null
-        var listener: ValueEventListener? = null
+        var listener: ChildEventListener? = null
         if (!nickname.isNullOrBlank()) {
             inboxRef = FirebaseDatabase.getInstance().getReference("chat_inbox/$nickname")
-            listener = object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    var totalUnread = 0L
-                    for (senderSnap in snapshot.children) {
-                        totalUnread += senderSnap.childrenCount
-                    }
-                    hasUnreadChatMessages = totalUnread > 0
-                }
+            listener = object : ChildEventListener {
+                override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
+                    val sender = snapshot.key ?: return
+                    val lastMsgSnap = snapshot.children.lastOrNull()
+                    val text = lastMsgSnap?.child("text")?.getValue(String::class.java) ?: ""
+                    val isDeck = text.startsWith("DECK:::")
+                    val displayMsg = if (isDeck) "Отправил вам колоду 🎴" else text
 
+                    FirebaseDatabase.getInstance().getReference("users/$sender/avatar")
+                        .addListenerForSingleValueEvent(object : ValueEventListener {
+                            override fun onDataChange(avSnap: DataSnapshot) {
+                                val av = avSnap.getValue(String::class.java) ?: "img"
+                                activeInAppBanner = InAppBannerData(
+                                    title = sender,
+                                    message = displayMsg,
+                                    avatarId = av,
+                                    senderNickname = sender
+                                )
+                            }
+                            override fun onCancelled(error: DatabaseError) {}
+                        })
+                }
+                override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {}
+                override fun onChildRemoved(snapshot: DataSnapshot) {}
+                override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {}
                 override fun onCancelled(error: DatabaseError) {}
             }
-            inboxRef.addValueEventListener(listener!!)
+            inboxRef.addChildEventListener(listener)
         }
         onDispose {
             if (inboxRef != null && listener != null) {
-                inboxRef!!.removeEventListener(listener!!)
+                inboxRef.removeEventListener(listener)
             }
         }
     }
@@ -3176,6 +3301,17 @@ fun FlashcardApp(
         ComboAnimationOverlay(
             amount = amount,
             onDismiss = { comboBonusToAnimate = null }
+        )
+    }
+
+    activeInAppBanner?.let { banner ->
+        InAppNotificationBanner(
+            banner = banner,
+            onClick = {
+                activeSession = null
+                currentTab = MainTab.CHAT
+            },
+            onDismiss = { activeInAppBanner = null }
         )
     }
 }
@@ -4310,10 +4446,7 @@ fun sendDeckToUser(
                 "message" to "Отправил вам колоду «$deckName». Откройте чат, чтобы скачать её.",
                 "avatarId" to userAvatar
             )
-            FirebaseDatabase.getInstance()
-                .getReference("notificationRequests/$targetUserNickname")
-                .push()
-                .setValue(notificationData)
+            sendSmartNotification(context, targetUserNickname, notificationData)
 
             // 1. Отправляем карточку колоды в chat_inbox получателя
             val deckMessageText = "DECK:::$deckName:::${cards.size}"
