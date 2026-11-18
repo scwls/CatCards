@@ -2985,6 +2985,14 @@ fun FlashcardApp(
                                     // Пользователь прямо сейчас в этом чате! Никаких баннеров не показываем!
                                     return
                                 }
+                                
+                                // Проверяем, был ли у нас открыт этот чат с момента запуска приложения,
+                                // и если да, то мы уже забрали сообщение, баннер не нужен
+                                val chatHistory = loadChatHistory(context, sender)
+                                if (chatHistory.any { it.timestamp == timestamp && !it.isFromMe }) {
+                                    return
+                                }
+
                                 FirebaseDatabase.getInstance().getReference("users/$sender/avatar")
                                     .addListenerForSingleValueEvent(object : ValueEventListener {
                                         override fun onDataChange(avSnap: DataSnapshot) {
