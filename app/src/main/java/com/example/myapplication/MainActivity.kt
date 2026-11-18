@@ -4532,28 +4532,25 @@ fun downloadSharedDecks(
                 }
 
                 val file = result.items[index]
+                val deckName = file.name.removeSuffix(".csv")
+                val alreadyExists = blocks.any { it.name.equals(deckName, ignoreCase = true) }
+
                 file.getBytes(10L * 1024L * 1024L)
                     .addOnSuccessListener { bytes ->
                         val cards = parseFlashcardsFromCsv(bytes)
-                        file.delete()
-                            .addOnSuccessListener {
-                                decrementAvailableDeckCount(nickname)
-                                if (cards.isNotEmpty()) {
-                                    blocks.add(
-                                        FlashcardBlock(
-                                            file.name.removeSuffix(".csv"),
-                                            cards
-                                        )
-                                    )
-                                }
-                                processNext(index + 1)
+                        file.delete().addOnCompleteListener {
+                            decrementAvailableDeckCount(nickname)
+                            if (!alreadyExists && cards.isNotEmpty()) {
+                                blocks.add(FlashcardBlock(deckName, cards))
                             }
-                            .addOnFailureListener {
-                                processNext(index + 1)
-                            }
+                            processNext(index + 1)
+                        }
                     }
                     .addOnFailureListener {
-                        processNext(index + 1)
+                        file.delete().addOnCompleteListener {
+                            decrementAvailableDeckCount(nickname)
+                            processNext(index + 1)
+                        }
                     }
             }
 
