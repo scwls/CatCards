@@ -1,8 +1,9 @@
 {
   "rules": {
     "users": {
+      ".read": "auth != null",
+      ".indexOn": ["email", "short_id"],
       "$username": {
-        ".read": "auth != null",
         ".write": "auth != null"
       }
     },
