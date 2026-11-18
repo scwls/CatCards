@@ -103,9 +103,13 @@ class StudyReminderReceiver : BroadcastReceiver() {
         val preferences = context.getSharedPreferences(STUDY_PREFS, Context.MODE_PRIVATE)
         val today = todayString()
 
-        // Уведомление отменится ТОЛЬКО если LAST_STUDY_DATE совпадает с сегодня
-        // (а это произойдет только при достижении 20 карточек в incrementLearnedToday)
-        if (preferences.getString(LAST_STUDY_DATE, null) == today) {
+        // Умное напоминание: если пользователь уже выполнил ежедневный квест (30 карточек) сегодня, 
+        // то уведомление не показываем, чтобы не раздражать.
+        val xpPrefs = context.getSharedPreferences("xp_prefs", Context.MODE_PRIVATE)
+        val cardsStudiedToday = xpPrefs.getInt("cards_studied_today_quest", 0)
+        
+        // Уведомление отменится, если выполнена старая норма (20 карт) ИЛИ новая норма квеста (30 карт)
+        if (preferences.getString(LAST_STUDY_DATE, null) == today || cardsStudiedToday >= 30) {
             return
         }
 

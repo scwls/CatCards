@@ -78,30 +78,33 @@ exports.sendNotification = onValueCreated("/notificationRequests/{nickname}/{req
   const tokenSnapshot = await admin.database().ref(`users/${nickname}/fcmToken`).get();
   const token = tokenSnapshot.val();
 
-  if (!token || typeof request !== "string" || !request.trim()) {
-    console.warn(`Notification skipped for ${nickname}: missing token or invalid request`);
+  // Теперь мы ждем не просто строку, а объект с полями action, sender, message, avatarId
+  if (!token || !request || typeof request !== "object") {
+    console.warn(`Notification skipped for ${nickname}: missing token or invalid request format`);
     await event.data.ref.remove();
     return;
   }
 
+  const action = request.action || "UNKNOWN";
+  const sender = request.sender || "CatCards";
+  const message = request.message || "";
+  const avatarId = request.avatarId || "🐱";
+
   try {
     await admin.messaging().send({
       token,
-      notification: {
-        title: "Сообщение от разработчика",
-        body: request
+      // ВНИМАНИЕ: мы не используем стандартный блок `notification: {}`,
+      // чтобы Android-приложение могло само перехватить Data-пуш в фоне
+      // и нарисовать аватарку пользователя как LargeIcon!
+      data: {
+        title: sender,
+        message: message,
+        avatar: avatarId,
+        action: action
       },
       android: {
-        priority: "high",
-        notification: {
-          channelId: "admin_msg_v2",
-          sound: "default",
-          defaultSound: true,
-          defaultVibrateTimings: true,
-          notificationPriority: "PRIORITY_HIGH"
-        }
-      },
-      data: { message: request }
+        priority: "high"
+      }
     });
     console.log(`Notification sent to ${nickname}`);
     await event.data.ref.remove();
