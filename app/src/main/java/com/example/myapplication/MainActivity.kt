@@ -3033,6 +3033,18 @@ fun FlashcardApp(
                 override fun onCancelled(error: DatabaseError) {}
             }
             inboxRef.addChildEventListener(listener)
+            
+            // Добавляем ValueEventListener для подсчета общего количества непрочитанных
+            inboxRef.addValueEventListener(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    var totalUnread = 0L
+                    for (senderSnap in snapshot.children) {
+                        totalUnread += senderSnap.childrenCount
+                    }
+                    hasUnreadChatMessages = totalUnread > 0
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            })
         }
         onDispose {
             if (inboxRef != null && listener != null) {
