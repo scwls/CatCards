@@ -94,6 +94,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.runtime.rememberCoroutineScope
@@ -167,6 +171,8 @@ import com.google.android.gms.tasks.Task
 import com.google.firebase.database.DatabaseReference
 import java.io.Serializable
 import java.lang.IllegalStateException
+import kotlin.math.floor
+import kotlin.math.sqrt
 
 private const val STUDY_PREFS = "study_preferences"
 private const val LAST_STUDY_DATE = "last_study_date"
@@ -174,6 +180,143 @@ private const val NICKNAME_PREFS = "user_preferences"
 private const val NICKNAME_KEY = "nickname"
 private const val FIREBASE_STORAGE_BUCKET = "gs://card-eng.firebasestorage.app"
 private const val ERROR_REPORT_MAX_BYTES = 5L * 1024L * 1024L
+
+object XpSystem {
+    private const val XP_PREFS = "xp_prefs"
+    private const val TOTAL_XP = "total_xp"
+    private const val CURRENT_STREAK = "current_streak"
+    private const val LAST_STREAK_DATE = "last_streak_date"
+    private const val CARDS_STUDIED_TODAY_QUEST = "cards_studied_today_quest"
+    private const val DAILY_QUEST_TARGET = 30
+
+    private fun getTodayString(): String {
+        return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+    }
+
+    fun awardXp(context: Context, amount: Int) {
+        if (amount == 0) return
+        val prefs = context.getSharedPreferences(XP_PREFS, Context.MODE_PRIVATE)
+        val currentXp = prefs.getInt(TOTAL_XP, 0)
+        val newXp = currentXp + amount
+        prefs.edit().putInt(TOTAL_XP, newXp).apply()
+
+        val nicknamePrefs = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
+        val nickname = nicknamePrefs.getString(NICKNAME_KEY, null)
+        if (!nickname.isNullOrEmpty()) {
+            val dbRef = FirebaseDatabase.getInstance().getReference("users/$nickname/xp")
+            dbRef.setValue(newXp)
+        }
+    }
+
+    private var comboCounter = 0
+
+    fun processCardStudiedForXp(context: Context, cardText: String, mode: String, isCorrect: Boolean): Int {
+        val today = getTodayString()
+        val prefs = context.getSharedPreferences(XP_PREFS, Context.MODE_PRIVATE)
+        val lastTrackingDate = prefs.getString("last_study_date_tracking", "")
+        
+        if (today != lastTrackingDate) {
+            prefs.edit()
+                .putString("last_study_date_tracking", today)
+                .putInt(CARDS_STUDIED_TODAY_QUEST, 0)
+                .remove("awarded_cards_today")
+                .apply()
+        }
+
+        var awardedComboBonus = 0
+        if (isCorrect) {
+            comboCounter++
+            if (comboCounter > 0 && comboCounter % 10 == 0) {
+                awardedComboBonus = 10
+                awardXp(context, awardedComboBonus)
+            }
+
+            val awardedCardsSet = prefs.getStringSet("awarded_cards_today", mutableSetOf())?.toMutableSet() ?: mutableSetOf()
+            val cardHash = "${cardText.hashCode()}_$mode"
+
+            if (!awardedCardsSet.contains(cardHash)) {
+                awardedCardsSet.add(cardHash)
+                prefs.edit().putStringSet("awarded_cards_today", awardedCardsSet).apply()
+
+                val baseXP = when (mode.uppercase(Locale.US)) {
+                    "SWIPE" -> 1
+                    "TILES" -> 2
+                    "INPUT" -> 5
+                    else -> 1
+                }
+                awardXp(context, baseXP)
+
+                val currentQuestCount = prefs.getInt(CARDS_STUDIED_TODAY_QUEST, 0)
+                if (currentQuestCount < DAILY_QUEST_TARGET) {
+                    val newQuestCount = currentQuestCount + 1
+                    prefs.edit().putInt(CARDS_STUDIED_TODAY_QUEST, newQuestCount).apply()
+
+                    if (newQuestCount == DAILY_QUEST_TARGET) {
+                        processStreakLogic(context)
+                    }
+                }
+            }
+        } else {
+            comboCounter = 0
+        }
+        return awardedComboBonus
+    }
+
+    private fun processStreakLogic(context: Context) {
+        val today = getTodayString()
+        val prefs = context.getSharedPreferences(XP_PREFS, Context.MODE_PRIVATE)
+        val lastStreakDate = prefs.getString(LAST_STREAK_DATE, "")
+        
+        val calendar = Calendar.getInstance()
+        calendar.add(Calendar.DAY_OF_YEAR, -1)
+        val yesterday = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(calendar.time)
+
+        var streak = prefs.getInt(CURRENT_STREAK, 0)
+
+        if (lastStreakDate == yesterday) {
+            streak++
+        } else if (lastStreakDate != today) {
+            streak = 1
+        }
+        
+        prefs.edit()
+            .putInt(CURRENT_STREAK, streak)
+            .putString(LAST_STREAK_DATE, today)
+            .apply()
+
+        // Sync streak to Firebase
+        val nicknamePrefs = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
+        val nickname = nicknamePrefs.getString(NICKNAME_KEY, null)
+        if (!nickname.isNullOrEmpty()) {
+            FirebaseDatabase.getInstance().getReference("users/$nickname/streak").setValue(streak)
+        }
+        
+        val streakBonus = when {
+            streak == 1 -> 10
+            streak == 2 -> 0
+            streak == 3 -> 25
+            streak == 5 -> 40
+            streak == 10 -> 75
+            streak % 30 == 0 -> 150
+            streak == 365 -> 500
+            streak == 730 -> 1000
+            else -> 5
+        }
+        
+        if (streakBonus > 0) {
+            awardXp(context, streakBonus)
+        }
+    }
+
+    fun getLevel(xp: Int): Int {
+        return floor(sqrt(xp / 10.0)).toInt() + 1
+    }
+
+    fun getXpForLevel(level: Int): Int {
+        val base = level - 1
+        return base * base * 10
+    }
+}
 
 enum class MainTab { PROFILE, DECKS, SETTINGS, CHAT }
 
@@ -636,6 +779,8 @@ fun GuestProfileScreen(
     var userShortId by remember { mutableStateOf("") }
     var userLearned by remember { mutableStateOf(0L) }
     var userWrong by remember { mutableStateOf(0L) }
+    var userXp by remember { mutableStateOf(0) }
+    var userStreak by remember { mutableStateOf(0) }
     var isLoading by remember { mutableStateOf(true) }
     var showSendDeckDialog by remember { mutableStateOf(false) }
 
@@ -646,6 +791,8 @@ fun GuestProfileScreen(
                 userDescription = snapshot.child("description").getValue(String::class.java) ?: "Пользователь пока ничего не рассказал о себе."
                 userAvatar = snapshot.child("avatar").getValue(String::class.java) ?: "🐱"
                 userShortId = snapshot.child("short_id").getValue(String::class.java) ?: ""
+                userXp = (snapshot.child("xp").value as? Number)?.toInt() ?: 0
+                userStreak = (snapshot.child("streak").value as? Number)?.toInt() ?: 0
                 
                 val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
                 val lastActive = snapshot.child("last_active_date").getValue(String::class.java)
@@ -694,11 +841,53 @@ fun GuestProfileScreen(
             
             Spacer(modifier = Modifier.height(16.dp))
             
-            Text(
-                text = userNickname + if (userShortId.isNotBlank()) " #$userShortId" else "",
-                style = MaterialTheme.typography.titleLarge, 
-                fontWeight = FontWeight.Bold
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = userNickname + if (userShortId.isNotBlank()) " #$userShortId" else "",
+                    style = MaterialTheme.typography.titleLarge, 
+                    fontWeight = FontWeight.Bold
+                )
+                if (userStreak > 0) {
+                    Spacer(Modifier.width(8.dp))
+                    Text("🔥 $userStreak", style = MaterialTheme.typography.titleMedium, color = Color(0xFFE65100))
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            val currentLevel = XpSystem.getLevel(userXp)
+            val nextLevel = currentLevel + 1
+            val currentLevelXp = XpSystem.getXpForLevel(currentLevel)
+            val nextLevelXp = XpSystem.getXpForLevel(nextLevel)
+            val xpProgress = if (nextLevelXp > currentLevelXp) {
+                (userXp - currentLevelXp).toFloat() / (nextLevelXp - currentLevelXp).toFloat()
+            } else 1f
+            
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Уровень $currentLevel", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    LinearProgressIndicator(
+                        progress = { xpProgress },
+                        modifier = Modifier.fillMaxWidth().height(8.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "$userXp / $nextLevelXp XP",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray
+                    )
+                }
+            }
             
             Spacer(modifier = Modifier.height(24.dp))
             
@@ -969,13 +1158,59 @@ fun ProfileScreen() {
         
         Spacer(modifier = Modifier.height(16.dp))
         
-        Text(
-            text = nickname + if (shortId.isNotBlank()) " #$shortId" else "",
-            style = MaterialTheme.typography.titleLarge, 
-            fontWeight = FontWeight.Bold
-        )
+        val xpPrefs = context.getSharedPreferences("xp_prefs", Context.MODE_PRIVATE)
+        val totalXp = xpPrefs.getInt("total_xp", 0)
+        val streak = xpPrefs.getInt("current_streak", 0)
         
-        Spacer(modifier = Modifier.height(16.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = nickname + if (shortId.isNotBlank()) " #$shortId" else "",
+                style = MaterialTheme.typography.titleLarge, 
+                fontWeight = FontWeight.Bold
+            )
+            if (streak > 0) {
+                Spacer(Modifier.width(8.dp))
+                Text("🔥 $streak", style = MaterialTheme.typography.titleMedium, color = Color(0xFFE65100))
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        val currentLevel = XpSystem.getLevel(totalXp)
+        val nextLevel = currentLevel + 1
+        val currentLevelXp = XpSystem.getXpForLevel(currentLevel)
+        val nextLevelXp = XpSystem.getXpForLevel(nextLevel)
+        val xpProgress = if (nextLevelXp > currentLevelXp) {
+            (totalXp - currentLevelXp).toFloat() / (nextLevelXp - currentLevelXp).toFloat()
+        } else 1f
+        
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Уровень $currentLevel", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = { xpProgress },
+                    modifier = Modifier.fillMaxWidth().height(8.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "$totalXp / $nextLevelXp XP",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(24.dp))
         
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -2159,6 +2394,42 @@ private fun DeveloperDialog(onDismiss: () -> Unit) {
 private fun Long?.orZero(): Long = this ?: 0L
 
 @Composable
+fun ComboAnimationOverlay(amount: Int, onDismiss: () -> Unit) {
+    var visible by remember { mutableStateOf(false) }
+
+    LaunchedEffect(amount) {
+        visible = true
+        delay(1500)
+        visible = false
+        delay(300) // wait for exit animation
+        onDismiss()
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(300)) + slideInVertically(initialOffsetY = { -it }),
+        exit = fadeOut(tween(300)) + slideOutVertically(targetOffsetY = { -it }),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Box(
+            contentAlignment = Alignment.TopCenter,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 72.dp)
+        ) {
+            Text(
+                text = "+$amount XP",
+                color = Color(0xFFFFB300),
+                style = MaterialTheme.typography.headlineMedium, // Сделали текст поменьше
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+                // Убрали shadowElevation, чтобы точно не было никаких артефактов "фона"
+            )
+        }
+    }
+}
+
+@Composable
 fun FlashcardApp(
     pinkTheme: Boolean,
     onThemeChange: (Boolean) -> Unit,
@@ -2181,8 +2452,8 @@ fun FlashcardApp(
     var blockForDialog by rememberSaveable { mutableStateOf<FlashcardBlock?>(null) }
     var isReverseMode by rememberSaveable { mutableStateOf(true) }
     var availableCloudDecks by remember { mutableStateOf(0) }
-
     var currentTab by rememberSaveable { mutableStateOf(MainTab.DECKS) }
+    var comboBonusToAnimate by remember { mutableStateOf<Int?>(null) }
 
     // После переустановки восстанавливаем колоды из базы по авторизованному аккаунту.
     LaunchedEffect(Unit) {
@@ -2406,6 +2677,10 @@ fun FlashcardApp(
                     saveBlocksToStorage(context, blocks)
                     if (correct == true && card != null) incrementLearnedToday(context, card)
                     if (correct == false) incrementWrongToday(context)
+                    if (correct != null && card != null) {
+                        val comboAwarded = XpSystem.processCardStudiedForXp(context, card.front, "SWIPE", correct)
+                        if (comboAwarded > 0) comboBonusToAnimate = comboAwarded
+                    }
                 },
                 modifier = modifier
             )
@@ -2419,6 +2694,10 @@ fun FlashcardApp(
                     saveBlocksToStorage(context, blocks)
                     if (correct == true && card != null) incrementLearnedToday(context, card)
                     if (correct == false) incrementWrongToday(context)
+                    if (correct != null && card != null) {
+                        val comboAwarded = XpSystem.processCardStudiedForXp(context, card.front, "TILES", correct)
+                        if (comboAwarded > 0) comboBonusToAnimate = comboAwarded
+                    }
                 },
                 modifier = modifier
             )
@@ -2432,6 +2711,10 @@ fun FlashcardApp(
                     saveBlocksToStorage(context, blocks)
                     if (correct == true && card != null) incrementLearnedToday(context, card)
                     if (correct == false) incrementWrongToday(context)
+                    if (correct != null && card != null) {
+                        val comboAwarded = XpSystem.processCardStudiedForXp(context, card.front, "INPUT", correct)
+                        if (comboAwarded > 0) comboBonusToAnimate = comboAwarded
+                    }
                 },
                 modifier = modifier
             )
@@ -2547,6 +2830,13 @@ fun FlashcardApp(
                 }
             }
         }
+    }
+    
+    comboBonusToAnimate?.let { amount ->
+        ComboAnimationOverlay(
+            amount = amount,
+            onDismiss = { comboBonusToAnimate = null }
+        )
     }
 }
 
