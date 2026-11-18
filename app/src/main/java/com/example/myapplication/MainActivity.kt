@@ -2959,6 +2959,8 @@ fun FlashcardApp(
     DisposableEffect(nickname) {
         var inboxRef: DatabaseReference? = null
         var listener: ChildEventListener? = null
+        val launchTime = System.currentTimeMillis() // Запоминаем время запуска экрана
+
         if (!nickname.isNullOrBlank()) {
             inboxRef = FirebaseDatabase.getInstance().getReference("chat_inbox/$nickname")
             listener = object : ChildEventListener {
@@ -2966,6 +2968,12 @@ fun FlashcardApp(
                     val sender = snapshot.key ?: return
                     val lastMsgSnap = snapshot.children.lastOrNull()
                     val text = lastMsgSnap?.child("text")?.getValue(String::class.java) ?: ""
+                    val timestamp = lastMsgSnap?.child("timestamp")?.getValue(Long::class.java) ?: 0L
+                    
+                    // Блокируем показ баннера для старых сообщений, 
+                    // которые уже лежали в базе до открытия приложения
+                    if (timestamp < launchTime) return
+                    
                     val isDeck = text.startsWith("DECK:::")
                     val displayMsg = if (isDeck) "Отправил вам колоду 🎴" else text
 
