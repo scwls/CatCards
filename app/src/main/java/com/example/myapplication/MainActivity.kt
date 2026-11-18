@@ -451,6 +451,8 @@ fun InAppNotificationBanner(
     onDismiss: () -> Unit
 ) {
     var visible by remember { mutableStateOf(false) }
+    var offsetX by remember { mutableStateOf(0f) }
+    val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(banner.id) {
         visible = true
@@ -464,7 +466,31 @@ fun InAppNotificationBanner(
         visible = visible,
         enter = fadeIn(tween(300)) + slideInVertically(initialOffsetY = { -it }),
         exit = fadeOut(tween(300)) + slideOutVertically(targetOffsetY = { -it }),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .offset { IntOffset(offsetX.roundToInt(), 0) }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        if (abs(offsetX) > size.width / 3) {
+                            visible = false
+                            coroutineScope.launch {
+                                delay(300)
+                                onDismiss()
+                            }
+                        } else {
+                            coroutineScope.launch {
+                                animateSwipeOffset(offsetX, 0f, 150) { offsetX = it }
+                            }
+                        }
+                    },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        offsetX += dragAmount
+                    }
+                )
+            }
     ) {
         Card(
             modifier = Modifier
