@@ -2036,18 +2036,6 @@ fun ChatDetailScreen(
                     horizontalArrangement = if (msg.isFromMe) Arrangement.End else Arrangement.Start,
                     verticalAlignment = Alignment.Bottom
                 ) {
-                    if (!msg.isFromMe) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
-                                .clickable { onViewProfile() },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            AvatarImage(avatar = recipientAvatar, size = 28.dp)
-                        }
-                        Spacer(Modifier.width(8.dp))
-                    }
                     Card(
                         colors = CardDefaults.cardColors(
                             containerColor = if (msg.isFromMe) MaterialTheme.colorScheme.primaryContainer 
