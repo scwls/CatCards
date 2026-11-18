@@ -2966,60 +2966,66 @@ fun FlashcardApp(
             inboxRef = FirebaseDatabase.getInstance().getReference("chat_inbox/$nickname")
             listener = object : ChildEventListener {
                 override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
-                    val sender = snapshot.key ?: return
-                    
-                    // Перебираем ВСЕ новые сообщения от этого отправителя (а не только последнее)
-                    for (msgSnap in snapshot.children) {
-                        val msgKey = msgSnap.key ?: continue
-                        if (shownBanners.contains(msgKey)) continue
+                    // Используем .ref для чтения обновлений внутри узла этого отправителя
+                    snapshot.ref.addValueEventListener(object : ValueEventListener {
+                        override fun onDataChange(senderSnap: DataSnapshot) {
+                            val sender = senderSnap.key ?: return
+                            
+                            // Перебираем ВСЕ сообщения от этого отправителя
+                            for (msgSnap in senderSnap.children) {
+                                val msgKey = msgSnap.key ?: continue
+                                if (shownBanners.contains(msgKey)) continue
 
-                        val text = msgSnap.child("text").getValue(String::class.java) ?: ""
-                        val timestamp = msgSnap.child("timestamp").getValue(Long::class.java) ?: 0L
+                                val text = msgSnap.child("text").getValue(String::class.java) ?: ""
+                                val timestamp = msgSnap.child("timestamp").getValue(Long::class.java) ?: 0L
 
-                        // Если сообщение старое (до запуска приложения), мы его просто ИГНОРИРУЕМ
-                        // (его заберет другой слушатель в ChatScreen для отображения кружочка с цифрой)
-                        if (timestamp < launchTime) continue
-
-                        shownBanners.add(msgKey)
-
-                        // Если дошли сюда, значит сообщение новое.
-                        val isDeck = text.startsWith("DECK:::")
-                        val displayMsg = if (isDeck) "Отправил вам колоду 🎴" else text
-
-                        FirebaseDatabase.getInstance().getReference("users/$nickname/active_chat_with")
-                            .addListenerForSingleValueEvent(object : ValueEventListener {
-                                override fun onDataChange(activeChatSnap: DataSnapshot) {
-                                    val currentActiveChat = activeChatSnap.getValue(String::class.java) ?: ""
-                                    if (currentActiveChat == sender) {
-                                        // Пользователь прямо сейчас в этом чате! Никаких баннеров не показываем!
-                                        // И ничего не удаляем из базы, так как это сделает слушатель внутри чата!
-                                        return
-                                    }
-
-                                    // ПОКАЗЫВАЕМ БАННЕР, НО НЕ УДАЛЯЕМ СООБЩЕНИЕ!
-                                    // Оставляем сообщение в Firebase, чтобы работал счетчик непрочитанных (красный кружок).
-                                    // Сообщение загрузится в историю только когда пользователь откроет диалог с другом.
-
-                                    FirebaseDatabase.getInstance().getReference("users/$sender/avatar")
-                                        .addListenerForSingleValueEvent(object : ValueEventListener {
-                                            override fun onDataChange(avSnap: DataSnapshot) {
-                                                val av = avSnap.getValue(String::class.java) ?: "img"
-                                                activeInAppBanner = InAppBannerData(
-                                                    title = sender,
-                                                    message = displayMsg,
-                                                    avatarId = av,
-                                                    senderNickname = sender
-                                                )
-                                            }
-                                            override fun onCancelled(error: DatabaseError) {}
-                                        })
+                                // Если сообщение старое (до запуска приложения), мы его просто ИГНОРИРУЕМ
+                                // (его заберет другой слушатель в ChatScreen для отображения кружочка с цифрой)
+                                if (timestamp < launchTime) {
+                                    shownBanners.add(msgKey)
+                                    continue
                                 }
-                                override fun onCancelled(error: DatabaseError) {}
-                            })
-                        
-                        // Выходим из цикла, показав баннер для первого нового сообщения
-                        break 
-                    }
+
+                                shownBanners.add(msgKey)
+
+                                // Если дошли сюда, значит сообщение новое.
+                                val isDeck = text.startsWith("DECK:::")
+                                val displayMsg = if (isDeck) "Отправил вам колоду 🎴" else text
+
+                                FirebaseDatabase.getInstance().getReference("users/$nickname/active_chat_with")
+                                    .addListenerForSingleValueEvent(object : ValueEventListener {
+                                        override fun onDataChange(activeChatSnap: DataSnapshot) {
+                                            val currentActiveChat = activeChatSnap.getValue(String::class.java) ?: ""
+                                            if (currentActiveChat == sender) {
+                                                // Пользователь прямо сейчас в этом чате! Никаких баннеров не показываем!
+                                                // И ничего не удаляем из базы, так как это сделает слушатель внутри чата!
+                                                return
+                                            }
+
+                                            // ПОКАЗЫВАЕМ БАННЕР, НО НЕ УДАЛЯЕМ СООБЩЕНИЕ!
+                                            FirebaseDatabase.getInstance().getReference("users/$sender/avatar")
+                                                .addListenerForSingleValueEvent(object : ValueEventListener {
+                                                    override fun onDataChange(avSnap: DataSnapshot) {
+                                                        val av = avSnap.getValue(String::class.java) ?: "img"
+                                                        activeInAppBanner = InAppBannerData(
+                                                            title = sender,
+                                                            message = displayMsg,
+                                                            avatarId = av,
+                                                            senderNickname = sender
+                                                        )
+                                                    }
+                                                    override fun onCancelled(error: DatabaseError) {}
+                                                })
+                                        }
+                                        override fun onCancelled(error: DatabaseError) {}
+                                    })
+                                
+                                // Выходим из цикла, показав баннер для первого нового сообщения
+                                break 
+                            }
+                        }
+                        override fun onCancelled(error: DatabaseError) {}
+                    })
                 }
                 override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {}
                 override fun onChildRemoved(snapshot: DataSnapshot) {}
