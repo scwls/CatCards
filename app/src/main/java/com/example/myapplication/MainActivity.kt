@@ -99,6 +99,9 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.draw.clip
 import androidx.compose.animation.AnimatedVisibility
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -2943,16 +2946,29 @@ fun FlashcardApp(
         }
     }
 
-    DisposableEffect(nickname) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, nickname) {
+        var onlineRef: DatabaseReference? = null
         if (!nickname.isNullOrBlank()) {
-            val onlineRef = FirebaseDatabase.getInstance().getReference("users/$nickname/is_online")
-            onlineRef.setValue(true)
-            onlineRef.onDisconnect().setValue(false)
+            onlineRef = FirebaseDatabase.getInstance().getReference("users/$nickname/is_online")
         }
-        onDispose {
-            if (!nickname.isNullOrBlank()) {
-                FirebaseDatabase.getInstance().getReference("users/$nickname/is_online").setValue(false)
+
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME || event == Lifecycle.Event.ON_START) {
+                // Приложение открыто (на экране)
+                onlineRef?.setValue(true)
+                onlineRef?.onDisconnect()?.setValue(false)
+            } else if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                // Приложение свернуто (в фоне)
+                onlineRef?.setValue(false)
             }
+        }
+        
+        lifecycleOwner.lifecycle.addObserver(observer)
+        
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            onlineRef?.setValue(false)
         }
     }
 
