@@ -2960,6 +2960,7 @@ fun FlashcardApp(
         var inboxRef: DatabaseReference? = null
         var listener: ChildEventListener? = null
         val launchTime = System.currentTimeMillis() // Запоминаем время запуска экрана
+        val shownBanners = mutableSetOf<String>()
 
         if (!nickname.isNullOrBlank()) {
             inboxRef = FirebaseDatabase.getInstance().getReference("chat_inbox/$nickname")
@@ -2969,12 +2970,17 @@ fun FlashcardApp(
                     
                     // Перебираем ВСЕ новые сообщения от этого отправителя (а не только последнее)
                     for (msgSnap in snapshot.children) {
+                        val msgKey = msgSnap.key ?: continue
+                        if (shownBanners.contains(msgKey)) continue
+
                         val text = msgSnap.child("text").getValue(String::class.java) ?: ""
                         val timestamp = msgSnap.child("timestamp").getValue(Long::class.java) ?: 0L
 
                         // Если сообщение старое (до запуска приложения), мы его просто ИГНОРИРУЕМ
                         // (его заберет другой слушатель в ChatScreen для отображения кружочка с цифрой)
                         if (timestamp < launchTime) continue
+
+                        shownBanners.add(msgKey)
 
                         // Если дошли сюда, значит сообщение новое.
                         val isDeck = text.startsWith("DECK:::")
@@ -2990,14 +2996,9 @@ fun FlashcardApp(
                                         return
                                     }
 
-                                    // Если чат не открыт, мы должны СОХРАНИТЬ это сообщение в локальную базу,
-                                    // чтобы оно не потерялось, и УДАЛИТЬ его из инбокса Firebase.
-                                    val history = loadChatHistory(context, sender).toMutableList()
-                                    if (history.none { it.timestamp == timestamp && !it.isFromMe }) {
-                                        history.add(ChatMessage(text, isFromMe = false, timestamp = timestamp))
-                                        saveChatHistory(context, sender, history)
-                                        msgSnap.ref.removeValue() // Удаляем из облака
-                                    }
+                                    // ПОКАЗЫВАЕМ БАННЕР, НО НЕ УДАЛЯЕМ СООБЩЕНИЕ!
+                                    // Оставляем сообщение в Firebase, чтобы работал счетчик непрочитанных (красный кружок).
+                                    // Сообщение загрузится в историю только когда пользователь откроет диалог с другом.
 
                                     FirebaseDatabase.getInstance().getReference("users/$sender/avatar")
                                         .addListenerForSingleValueEvent(object : ValueEventListener {
