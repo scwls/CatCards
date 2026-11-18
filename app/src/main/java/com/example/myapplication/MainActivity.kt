@@ -1038,119 +1038,130 @@ fun GuestProfileScreen(
     }
 
     if (showSendDeckDialog) {
-        val context = LocalContext.current
-        val myBlocks = remember { loadBlocksFromStorage(context) ?: emptyList() }
-        var isSending by remember { mutableStateOf(false) }
-        var sendStatusMessage by remember { mutableStateOf<String?>(null) }
-        
-        val csvPicker = rememberLauncherForActivityResult(
-            ActivityResultContracts.GetContent()
-        ) { uri: Uri? ->
-            if (uri != null) {
-                isSending = true
-                val name = getFileName(context, uri).removeSuffix(".csv")
-                val cards = loadFlashcardsFromUri(context, uri)
-                if (cards.isNotEmpty()) {
-                    sendDeckToUser(
-                        context = context,
-                        targetUserNickname = userNickname,
-                        deckName = name,
-                        cards = cards,
-                        onSuccess = {
-                            isSending = false
-                            Toast.makeText(context, "Колода «$name» отправлена $userNickname!", Toast.LENGTH_SHORT).show()
-                            showSendDeckDialog = false
-                        },
-                        onFailure = { err ->
-                            isSending = false
-                            sendStatusMessage = err
-                        }
-                    )
-                } else {
-                    isSending = false
-                    sendStatusMessage = "Не удалось прочитать карточки из файла"
-                }
+        SendDeckDialog(
+            targetUserNickname = userNickname,
+            onDismiss = { showSendDeckDialog = false }
+        )
+    }
+}
+
+@Composable
+fun SendDeckDialog(
+    targetUserNickname: String,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val myBlocks = remember { loadBlocksFromStorage(context) ?: emptyList() }
+    var isSending by remember { mutableStateOf(false) }
+    var sendStatusMessage by remember { mutableStateOf<String?>(null) }
+    
+    val csvPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            isSending = true
+            val name = getFileName(context, uri).removeSuffix(".csv")
+            val cards = loadFlashcardsFromUri(context, uri)
+            if (cards.isNotEmpty()) {
+                sendDeckToUser(
+                    context = context,
+                    targetUserNickname = targetUserNickname,
+                    deckName = name,
+                    cards = cards,
+                    onSuccess = {
+                        isSending = false
+                        Toast.makeText(context, "Колода «$name» отправлена $targetUserNickname!", Toast.LENGTH_SHORT).show()
+                        onDismiss()
+                    },
+                    onFailure = { err ->
+                        isSending = false
+                        sendStatusMessage = err
+                    }
+                )
+            } else {
+                isSending = false
+                sendStatusMessage = "Не удалось прочитать карточки из файла"
             }
         }
+    }
 
-        Dialog(onDismissRequest = { if (!isSending) showSendDeckDialog = false }) {
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Отправить колоду", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("Выберите колоду для $userNickname", style = MaterialTheme.typography.bodySmall, color = Color.Gray, modifier = Modifier.padding(bottom = 16.dp))
-                    
-                    if (isSending) {
-                        CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+    Dialog(onDismissRequest = { if (!isSending) onDismiss() }) {
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Отправить колоду", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Выберите колоду для $targetUserNickname", style = MaterialTheme.typography.bodySmall, color = Color.Gray, modifier = Modifier.padding(bottom = 16.dp))
+                
+                if (isSending) {
+                    CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+                } else {
+                    if (myBlocks.isEmpty()) {
+                        Text("У вас пока нет сохраненных колод", color = Color.Gray, modifier = Modifier.padding(vertical = 12.dp))
                     } else {
-                        if (myBlocks.isEmpty()) {
-                            Text("У вас пока нет сохраненных колод", color = Color.Gray, modifier = Modifier.padding(vertical = 12.dp))
-                        } else {
-                            LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
-                                items(myBlocks) { block ->
-                                    Card(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 4.dp)
-                                            .clickable {
-                                                isSending = true
-                                                sendDeckToUser(
-                                                    context = context,
-                                                    targetUserNickname = userNickname,
-                                                    deckName = block.name,
-                                                    cards = block.cards,
-                                                    onSuccess = {
-                                                        isSending = false
-                                                        Toast.makeText(context, "Колода «${block.name}» отправлена $userNickname!", Toast.LENGTH_SHORT).show()
-                                                        showSendDeckDialog = false
-                                                    },
-                                                    onFailure = { err ->
-                                                        isSending = false
-                                                        sendStatusMessage = err
-                                                    }
-                                                )
-                                            },
-                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                        LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
+                            items(myBlocks) { block ->
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp)
+                                        .clickable {
+                                            isSending = true
+                                            sendDeckToUser(
+                                                context = context,
+                                                targetUserNickname = targetUserNickname,
+                                                deckName = block.name,
+                                                cards = block.cards,
+                                                onSuccess = {
+                                                    isSending = false
+                                                    Toast.makeText(context, "Колода «${block.name}» отправлена $targetUserNickname!", Toast.LENGTH_SHORT).show()
+                                                    onDismiss()
+                                                },
+                                                onFailure = { err ->
+                                                    isSending = false
+                                                    sendStatusMessage = err
+                                                }
+                                            )
+                                        },
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(block.name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                                            Text("${block.cards.size} шт.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                                        }
+                                        Text(block.name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                        Text("${block.cards.size} шт.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                                     }
                                 }
                             }
                         }
-                        
-                        Spacer(modifier = Modifier.height(12.dp))
-                        
-                        OutlinedButton(
-                            onClick = { csvPicker.launch("*/*") },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Из файла (.csv)")
-                        }
-                    }
-                    
-                    sendStatusMessage?.let {
-                        Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
                     }
                     
                     Spacer(modifier = Modifier.height(12.dp))
                     
-                    TextButton(
-                        onClick = { showSendDeckDialog = false },
-                        enabled = !isSending,
+                    OutlinedButton(
+                        onClick = { csvPicker.launch("*/*") },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Отмена")
+                        Text("Из файла (.csv)")
                     }
+                }
+                
+                sendStatusMessage?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+                }
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                TextButton(
+                    onClick = onDismiss,
+                    enabled = !isSending,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Отмена")
                 }
             }
         }
@@ -2063,6 +2074,8 @@ fun ChatDetailScreen(
             }
         }
         
+        var showSendDeckDialog by remember { mutableStateOf(false) }
+
         Column(
             Modifier.fillMaxWidth().padding(16.dp)
         ) {
@@ -2086,6 +2099,17 @@ fun ChatDetailScreen(
                     }
                 )
                 Spacer(Modifier.width(8.dp))
+
+                if (messageText.isBlank()) {
+                    OutlinedButton(
+                        onClick = { showSendDeckDialog = true },
+                        modifier = Modifier.padding(bottom = 20.dp)
+                    ) {
+                        Text("Колода", maxLines = 1, fontSize = 12.sp)
+                    }
+                    Spacer(Modifier.width(4.dp))
+                }
+
                 Button(
                     onClick = {
                         if (messageText.isNotBlank() && currentNickname != null) {
@@ -2103,7 +2127,7 @@ fun ChatDetailScreen(
                                 
                             // Также отправляем как уведомление (существующая логика), 
                             // но добавим имя отправителя, чтобы было понятно от кого
-                            val userAvatar = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE).getString("user_avatar", "🐱") ?: "🐱"
+                            val userAvatar = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE).getString("user_avatar", "img") ?: "img"
                             val notificationData = mapOf(
                                 "action" to "CHAT_MESSAGE",
                                 "sender" to currentNickname,
@@ -2116,11 +2140,19 @@ fun ChatDetailScreen(
                             messageText = ""
                         }
                     },
-                    modifier = Modifier.padding(bottom = 20.dp) // Выравнивание кнопки из-за supportingText
+                    enabled = messageText.isNotBlank(),
+                    modifier = Modifier.padding(bottom = 20.dp)
                 ) {
-                    Text("Отправить")
+                    Text(">", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 }
             }
+        }
+
+        if (showSendDeckDialog) {
+            SendDeckDialog(
+                targetUserNickname = recipient,
+                onDismiss = { showSendDeckDialog = false }
+            )
         }
     }
 }
