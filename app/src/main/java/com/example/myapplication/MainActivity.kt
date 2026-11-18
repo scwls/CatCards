@@ -1170,7 +1170,7 @@ fun SendDeckDialog(
 }
 
 @Composable
-fun ProfileScreen() {
+fun ProfileScreen(blocks: MutableList<FlashcardBlock>) {
     val context = LocalContext.current
     val prefs = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
     val nickname = prefs.getString(NICKNAME_KEY, "Пользователь") ?: "Пользователь"
@@ -1192,7 +1192,8 @@ fun ProfileScreen() {
         ChatDetailScreen(
             recipient = selectedChatUser!!,
             onBack = { selectedChatUser = null },
-            onViewProfile = { profileToView = selectedChatUser }
+            onViewProfile = { profileToView = selectedChatUser },
+            blocks = blocks
         )
     } else {
         var description by remember { mutableStateOf(prefs.getString("user_description", "") ?: "") }
@@ -1954,7 +1955,8 @@ fun loadChatHistory(context: Context, partner: String): List<ChatMessage> {
 fun ChatDetailScreen(
     recipient: String,
     onBack: () -> Unit,
-    onViewProfile: () -> Unit
+    onViewProfile: () -> Unit,
+    blocks: MutableList<FlashcardBlock>
 ) {
     BackHandler(enabled = true) {
         onBack()
@@ -2085,9 +2087,10 @@ fun ChatDetailScreen(
                                             downloadSpecificSharedDeck(
                                                 context = context,
                                                 deckName = deckName,
+                                                blocks = blocks,
                                                 onSuccess = { name ->
                                                     isDownloading = false
-                                                    Toast.makeText(context, "Колода «$name» сохранена!", Toast.LENGTH_SHORT).show()
+                                                    Toast.makeText(context, "Колода «$name» добавлена на экран колод!", Toast.LENGTH_SHORT).show()
                                                 },
                                                 onFailure = { err ->
                                                     isDownloading = false
@@ -2223,7 +2226,7 @@ fun ChatDetailScreen(
 }
 
 @Composable
-fun ChatScreen() {
+fun ChatScreen(blocks: MutableList<FlashcardBlock>) {
     var users by remember { mutableStateOf<Map<String, UserActivity>>(emptyMap()) }
     var usersError by remember { mutableStateOf<String?>(null) }
     var selectedChatUser by remember { mutableStateOf<String?>(null) }
@@ -2321,7 +2324,8 @@ fun ChatScreen() {
         ChatDetailScreen(
             recipient = selectedChatUser!!,
             onBack = { selectedChatUser = null },
-            onViewProfile = { profileToView = selectedChatUser }
+            onViewProfile = { profileToView = selectedChatUser },
+            blocks = blocks
         )
     } else {
         Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -2959,7 +2963,7 @@ fun FlashcardApp(
         ) { paddingValues ->
             Box(modifier = modifier.padding(paddingValues).fillMaxSize()) {
                 when (currentTab) {
-                    MainTab.PROFILE -> ProfileScreen()
+                    MainTab.PROFILE -> ProfileScreen(blocks = blocks)
                     MainTab.DECKS -> {
                         BlockSelectionScreen(
                             blocks = blocks,
@@ -2990,7 +2994,7 @@ fun FlashcardApp(
                             onThemeChange = onThemeChange
                         )
                     }
-                    MainTab.CHAT -> ChatScreen()
+                    MainTab.CHAT -> ChatScreen(blocks = blocks)
                 }
             }
         }
@@ -4333,6 +4337,7 @@ fun sendDeckToUser(
 fun downloadSpecificSharedDeck(
     context: Context,
     deckName: String,
+    blocks: MutableList<FlashcardBlock>,
     onSuccess: (String) -> Unit,
     onFailure: (String) -> Unit
 ) {
@@ -4349,14 +4354,13 @@ fun downloadSpecificSharedDeck(
             storageRef.delete().addOnCompleteListener {
                 decrementAvailableDeckCount(nickname)
                 if (cards.isNotEmpty()) {
-                    val currentBlocks = (loadBlocksFromStorage(context) ?: emptyList()).toMutableList()
-                    val existingIndex = currentBlocks.indexOfFirst { it.name.equals(deckName, ignoreCase = true) }
+                    val existingIndex = blocks.indexOfFirst { it.name.equals(deckName, ignoreCase = true) }
                     if (existingIndex >= 0) {
-                        currentBlocks[existingIndex] = FlashcardBlock(deckName, cards)
+                        blocks[existingIndex] = FlashcardBlock(deckName, cards)
                     } else {
-                        currentBlocks.add(FlashcardBlock(deckName, cards))
+                        blocks.add(FlashcardBlock(deckName, cards))
                     }
-                    saveBlocksToStorage(context, currentBlocks)
+                    saveBlocksToStorage(context, blocks)
                     onSuccess(deckName)
                 } else {
                     onFailure("Файл колоды пуст")
@@ -4364,9 +4368,8 @@ fun downloadSpecificSharedDeck(
             }
         }
         .addOnFailureListener {
-            val currentBlocks = loadBlocksFromStorage(context) ?: emptyList()
-            if (currentBlocks.any { it.name.equals(deckName, ignoreCase = true) }) {
-                onSuccess("$deckName (уже в ваших колодах)")
+            if (blocks.any { it.name.equals(deckName, ignoreCase = true) }) {
+                onSuccess("$deckName (уже на экране колод)")
             } else {
                 onFailure("Колода недоступна для скачивания")
             }
