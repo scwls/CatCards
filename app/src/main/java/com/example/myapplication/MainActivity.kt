@@ -2079,7 +2079,9 @@ fun ChatDetailScreen(
                                     }
                                 }
                                 
-                                if (!msg.isFromMe) {
+                                val isAlreadyDownloaded = blocks.any { it.name.equals(deckName, ignoreCase = true) }
+
+                                if (!msg.isFromMe && !isAlreadyDownloaded) {
                                     Spacer(Modifier.height(8.dp))
                                     Button(
                                         onClick = {
