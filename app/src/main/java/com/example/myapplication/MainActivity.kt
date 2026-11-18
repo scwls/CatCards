@@ -2966,49 +2966,58 @@ fun FlashcardApp(
             listener = object : ChildEventListener {
                 override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
                     val sender = snapshot.key ?: return
-                    val lastMsgSnap = snapshot.children.lastOrNull()
-                    val text = lastMsgSnap?.child("text")?.getValue(String::class.java) ?: ""
-                    val timestamp = lastMsgSnap?.child("timestamp")?.getValue(Long::class.java) ?: 0L
                     
-                    // Блокируем показ баннера для старых сообщений, 
-                    // которые уже лежали в базе до открытия приложения
-                    if (timestamp < launchTime) return
-                    
-                    val isDeck = text.startsWith("DECK:::")
-                    val displayMsg = if (isDeck) "Отправил вам колоду 🎴" else text
+                    // Перебираем ВСЕ новые сообщения от этого отправителя (а не только последнее)
+                    for (msgSnap in snapshot.children) {
+                        val text = msgSnap.child("text").getValue(String::class.java) ?: ""
+                        val timestamp = msgSnap.child("timestamp").getValue(Long::class.java) ?: 0L
 
-                    FirebaseDatabase.getInstance().getReference("users/$nickname/active_chat_with")
-                        .addListenerForSingleValueEvent(object : ValueEventListener {
-                            override fun onDataChange(activeChatSnap: DataSnapshot) {
-                                val currentActiveChat = activeChatSnap.getValue(String::class.java) ?: ""
-                                if (currentActiveChat == sender) {
-                                    // Пользователь прямо сейчас в этом чате! Никаких баннеров не показываем!
-                                    return
-                                }
-                                
-                                // Проверяем, был ли у нас открыт этот чат с момента запуска приложения,
-                                // и если да, то мы уже забрали сообщение, баннер не нужен
-                                val chatHistory = loadChatHistory(context, sender)
-                                if (chatHistory.any { it.timestamp == timestamp && !it.isFromMe }) {
-                                    return
-                                }
+                        // Если хотя бы одно сообщение новее времени запуска, мы хотим показать баннер
+                        // и сохранить в локальную базу, если мы НЕ в чате.
+                        if (timestamp >= launchTime) {
+                            val isDeck = text.startsWith("DECK:::")
+                            val displayMsg = if (isDeck) "Отправил вам колоду 🎴" else text
 
-                                FirebaseDatabase.getInstance().getReference("users/$sender/avatar")
-                                    .addListenerForSingleValueEvent(object : ValueEventListener {
-                                        override fun onDataChange(avSnap: DataSnapshot) {
-                                            val av = avSnap.getValue(String::class.java) ?: "img"
-                                            activeInAppBanner = InAppBannerData(
-                                                title = sender,
-                                                message = displayMsg,
-                                                avatarId = av,
-                                                senderNickname = sender
-                                            )
+                            FirebaseDatabase.getInstance().getReference("users/$nickname/active_chat_with")
+                                .addListenerForSingleValueEvent(object : ValueEventListener {
+                                    override fun onDataChange(activeChatSnap: DataSnapshot) {
+                                        val currentActiveChat = activeChatSnap.getValue(String::class.java) ?: ""
+                                        if (currentActiveChat == sender) {
+                                            // Пользователь прямо сейчас в этом чате! Никаких баннеров не показываем!
+                                            return
                                         }
-                                        override fun onCancelled(error: DatabaseError) {}
-                                    })
-                            }
-                            override fun onCancelled(error: DatabaseError) {}
-                        })
+
+                                        // Если чат не открыт, мы должны СОХРАНИТЬ это сообщение в локальную базу,
+                                        // чтобы оно не потерялось, и УДАЛИТЬ его из инбокса Firebase.
+                                        // Потому что раз мы увидели баннер, значит сообщение доставлено.
+                                        val history = loadChatHistory(context, sender).toMutableList()
+                                        if (history.none { it.timestamp == timestamp && !it.isFromMe }) {
+                                            history.add(ChatMessage(text, isFromMe = false, timestamp = timestamp))
+                                            saveChatHistory(context, sender, history)
+                                            msgSnap.ref.removeValue() // Удаляем из облака
+                                        }
+
+                                        FirebaseDatabase.getInstance().getReference("users/$sender/avatar")
+                                            .addListenerForSingleValueEvent(object : ValueEventListener {
+                                                override fun onDataChange(avSnap: DataSnapshot) {
+                                                    val av = avSnap.getValue(String::class.java) ?: "img"
+                                                    activeInAppBanner = InAppBannerData(
+                                                        title = sender,
+                                                        message = displayMsg,
+                                                        avatarId = av,
+                                                        senderNickname = sender
+                                                    )
+                                                }
+                                                override fun onCancelled(error: DatabaseError) {}
+                                            })
+                                    }
+                                    override fun onCancelled(error: DatabaseError) {}
+                                })
+                            
+                            // Выходим из цикла, показав баннер для первого нового сообщения
+                            break 
+                        }
+                    }
                 }
                 override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {}
                 override fun onChildRemoved(snapshot: DataSnapshot) {}
