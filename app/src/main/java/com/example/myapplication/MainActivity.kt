@@ -473,11 +473,14 @@ fun InAppNotificationBanner(
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
-                        // Порог смахивания уменьшен с 1/3 до 1/5 ширины экрана (или до 150 пикселей)
-                        if (abs(offsetX) > size.width / 5 || abs(offsetX) > 150f) {
-                            visible = false
+                        // Очень чувствительный порог: достаточно сдвинуть на 50 пикселей
+                        if (abs(offsetX) > 50f) {
+                            val targetOffset = if (offsetX > 0) size.width.toFloat() else -size.width.toFloat()
                             coroutineScope.launch {
-                                delay(200)
+                                // Анимируем вылет за пределы экрана, а уже потом скрываем
+                                animateSwipeOffset(offsetX, targetOffset, 150) { offsetX = it }
+                                visible = false
+                                delay(100) // Ждем завершения анимации исчезновения (exit = fadeOut)
                                 onDismiss()
                             }
                         } else {
