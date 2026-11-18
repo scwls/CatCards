@@ -35,6 +35,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.imePadding
 import android.content.res.Configuration
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.material3.Scaffold
 import androidx.compose.foundation.clickable
@@ -390,17 +393,32 @@ fun scheduleDailyAlarms(context: Context) {
     setAlarmForHour(20, 20)
 }
 
+fun textToBitmap(text: String): Bitmap {
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = 100f
+        textAlign = Paint.Align.CENTER
+    }
+    val baseline = -paint.ascent()
+    val width = (paint.measureText(text) + 20f).toInt().coerceAtLeast(1)
+    val height = (baseline + paint.descent() + 20f).toInt().coerceAtLeast(1)
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    canvas.drawText(text, width / 2f, baseline + 10f, paint)
+    return bitmap
+}
+
 fun showAdminMessageNotification(
     context: Context,
     message: String,
-    title: String = "Сообщение от разработчика"
+    title: String = "CatCards",
+    avatar: String = "🐱"
 ) {
     val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         notificationManager.createNotificationChannel(
             NotificationChannel(
                 "admin_msg_v2",
-                "Сообщения от разработчика", 
+                "Сообщения", 
                 NotificationManager.IMPORTANCE_HIGH
             )
         )
@@ -411,6 +429,7 @@ fun showAdminMessageNotification(
     )
     val notification = NotificationCompat.Builder(context, "admin_msg_v2")
         .setSmallIcon(R.drawable.ic_dialog_info)
+        .setLargeIcon(textToBitmap(avatar))
         .setContentTitle(title)
         .setContentText(message)
         .setContentIntent(pendingIntent)
@@ -1541,10 +1560,16 @@ fun FriendsDialog(
                                                 // Игнорируем ошибку, используем стандартную аватарку, 
                                                 // так как внутри LaunchedEffect не всегда есть доступ к context
                                                 val userAvatar = "🐱"
+                                                val notificationData = mapOf(
+                                                    "action" to "FRIEND_REQUEST",
+                                                    "sender" to currentNickname,
+                                                    "message" to "Хочет добавить вас в друзья!",
+                                                    "avatarId" to userAvatar
+                                                )
                                                 FirebaseDatabase.getInstance()
                                                     .getReference("notificationRequests/$target")
                                                     .push()
-                                                    .setValue("Новая заявка:::Пользователь $currentNickname хочет добавить вас в друзья!:::$userAvatar")
+                                                    .setValue(notificationData)
                                                     
                                                 statusMessage = "Запрос отправлен!"
                                                 friendIdInput = ""
@@ -1596,9 +1621,15 @@ fun FriendsDialog(
                                                 
                                                 // Уведомляем отправителя, что мы приняли его заявку
                                                 val userAvatar = "🐱" // Аналогично, упрощаем до дефолтной аватарки в этом скоупе
+                                                val notificationData = mapOf(
+                                                    "action" to "FRIEND_ACCEPT",
+                                                    "sender" to currentNickname,
+                                                    "message" to "Принял вашу заявку в друзья!",
+                                                    "avatarId" to userAvatar
+                                                )
                                                 db.getReference("notificationRequests/$sender")
                                                     .push()
-                                                    .setValue("Заявка принята:::Пользователь $currentNickname принял вашу заявку в друзья!:::$userAvatar")
+                                                    .setValue(notificationData)
                                             }) {
                                                 Icon(Icons.Filled.Check, contentDescription = "Принять", tint = Color(0xFF2E7D32))
                                             }
@@ -2011,8 +2042,14 @@ fun ChatDetailScreen(
                             // Также отправляем как уведомление (существующая логика), 
                             // но добавим имя отправителя, чтобы было понятно от кого
                             val userAvatar = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE).getString("user_avatar", "🐱") ?: "🐱"
+                            val notificationData = mapOf(
+                                "action" to "CHAT_MESSAGE",
+                                "sender" to currentNickname,
+                                "message" to messageText,
+                                "avatarId" to userAvatar
+                            )
                             FirebaseDatabase.getInstance().getReference("notificationRequests/$recipient")
-                                .push().setValue("$currentNickname:::$messageText:::$userAvatar")
+                                .push().setValue(notificationData)
                                 
                             messageText = ""
                         }
@@ -2236,10 +2273,16 @@ private fun DeveloperDialog(onDismiss: () -> Unit) {
                         completed++
                         if (completed == csvUris.size) {
                             if (uploaded > 0) {
+                                val notificationData = mapOf(
+                                    "action" to "DEVELOPER_MESSAGE",
+                                    "sender" to "Разработчик",
+                                    "message" to "Отправил вам $uploaded ${if (uploaded == 1) "новую колоду" else "новые колоды"}. Откройте «Из облака», чтобы скачать их.",
+                                    "avatarId" to "🧑‍💻"
+                                )
                                 FirebaseDatabase.getInstance()
                                     .getReference("notificationRequests/$user")
                                     .push()
-                                    .setValue("Разработчик отправил вам $uploaded ${if (uploaded == 1) "новую колоду" else "новые колоды"}. Откройте «Из облака», чтобы скачать их.")
+                                    .setValue(notificationData)
                             }
                             uploadMessage = "Отправлено колод: $uploaded из ${csvUris.size}"
                         }
@@ -4008,10 +4051,16 @@ fun sendDeckToUser(
                 })
                 
             val userAvatar = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE).getString("user_avatar", "🐱") ?: "🐱"
+            val notificationData = mapOf(
+                "action" to "NEW_DECK",
+                "sender" to myNickname,
+                "message" to "Отправил вам колоду «$deckName». Откройте «Из облака», чтобы скачать её.",
+                "avatarId" to userAvatar
+            )
             FirebaseDatabase.getInstance()
                 .getReference("notificationRequests/$targetUserNickname")
                 .push()
-                .setValue("Новая колода:::Пользователь $myNickname отправил вам колоду «$deckName». Откройте «Из облака», чтобы скачать её.:::$userAvatar")
+                .setValue(notificationData)
                 
             onSuccess()
         }

@@ -19,9 +19,10 @@ class FirebaseMessagingService : FcmService() {
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
-        val title = message.notification?.title ?: "CatCards"
-        val body = message.notification?.body ?: message.data["message"] ?: return
-        showAdminMessageNotification(this, body, title)
+        val title = message.data["title"] ?: message.notification?.title ?: "CatCards"
+        val body = message.data["message"] ?: message.notification?.body ?: return
+        val avatar = message.data["avatar"] ?: "🐱"
+        showAdminMessageNotification(this, body, title, avatar)
     }
 
     override fun onNewToken(token: String) {
