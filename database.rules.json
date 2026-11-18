@@ -1,0 +1,34 @@
+{
+  "rules": {
+    "users": {
+      "$username": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "friends": {
+      "$username": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "friend_requests": {
+      "$target": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "chat_inbox": {
+      "$recipient": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "notificationRequests": {
+      "$recipient": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    }
+  }
+}
