@@ -1537,6 +1537,12 @@ fun FriendsDialog(
                                         val target = searchResultNickname!!
                                         FirebaseDatabase.getInstance().getReference("friend_requests/$target/$currentNickname").setValue(true)
                                             .addOnSuccessListener {
+                                                // Отправляем пуш-уведомление пользователю
+                                                FirebaseDatabase.getInstance()
+                                                    .getReference("notificationRequests/$target")
+                                                    .push()
+                                                    .setValue("Пользователь $currentNickname хочет добавить вас в друзья!")
+                                                    
                                                 statusMessage = "Запрос отправлен!"
                                                 friendIdInput = ""
                                                 searchResultNickname = null
@@ -1584,6 +1590,11 @@ fun FriendsDialog(
                                                 db.getReference("friends/$currentNickname/$sender").setValue(true)
                                                 db.getReference("friends/$sender/$currentNickname").setValue(true)
                                                 db.getReference("friend_requests/$currentNickname/$sender").removeValue()
+                                                
+                                                // Уведомляем отправителя, что мы приняли его заявку
+                                                db.getReference("notificationRequests/$sender")
+                                                    .push()
+                                                    .setValue("Пользователь $currentNickname принял вашу заявку в друзья!")
                                             }) {
                                                 Icon(Icons.Filled.Check, contentDescription = "Принять", tint = Color(0xFF2E7D32))
                                             }
@@ -1993,9 +2004,10 @@ fun ChatDetailScreen(
                             FirebaseDatabase.getInstance().getReference("chat_inbox/$recipient/$currentNickname")
                                 .push().setValue(newMessage)
                                 
-                            // Также отправляем как уведомление (существующая логика)
+                            // Также отправляем как уведомление (существующая логика), 
+                            // но добавим имя отправителя, чтобы было понятно от кого
                             FirebaseDatabase.getInstance().getReference("notificationRequests/$recipient")
-                                .push().setValue(messageText)
+                                .push().setValue("Новое сообщение от $currentNickname: $messageText")
                                 
                             messageText = ""
                         }
