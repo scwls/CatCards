@@ -1985,81 +1985,261 @@ fun SettingsScreen(
         }
     }
     
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp)
+    ) {
         Text("Настройки", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(bottom = 24.dp))
         
-        val currentEmail = prefs.getString("email", "") ?: ""
-        if (currentEmail.isNotBlank()) {
-            Text(
-                text = "Email: $currentEmail",
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
-        }
-        
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        // Раздел: Аккаунт
+        Text("👤 Аккаунт", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp, start = 4.dp))
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
         ) {
-            Text(
-                text = "Ваш ник: ${if (currentNickname.isNotBlank()) currentNickname else "не указан"}",
-                fontWeight = FontWeight.Bold
-            )
-            TextButton(onClick = { 
-                newNickname = currentNickname
-                renameError = null
-                showRenameDialog = true 
-            }) {
-                Text("Изменить")
+            Column(Modifier.padding(16.dp)) {
+                val currentEmail = prefs.getString("email", "") ?: ""
+                if (currentEmail.isNotBlank()) {
+                    Text(text = "Email", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+                    Text(text = currentEmail, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 12.dp))
+                }
+                
+                Text(text = "Никнейм", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (currentNickname.isNotBlank()) currentNickname else "не указан",
+                        fontWeight = FontWeight.Bold
+                    )
+                    TextButton(onClick = { 
+                        newNickname = currentNickname
+                        renameError = null
+                        showRenameDialog = true 
+                    }) {
+                        Text("Изменить")
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                var showPasswordDialog by remember { mutableStateOf(false) }
+                OutlinedButton(onClick = { showPasswordDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Изменить пароль")
+                }
+                if (showPasswordDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showPasswordDialog = false },
+                        title = { Text("Смена пароля") },
+                        text = { Text("Отправить ссылку для сброса пароля на вашу почту ($currentEmail)?") },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                FirebaseAuth.getInstance().sendPasswordResetEmail(currentEmail)
+                                    .addOnSuccessListener {
+                                        Toast.makeText(context, "Ссылка отправлена на почту", Toast.LENGTH_SHORT).show()
+                                    }
+                                    .addOnFailureListener { e ->
+                                        Toast.makeText(context, "Ошибка: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
+                                showPasswordDialog = false
+                            }) { Text("Отправить") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showPasswordDialog = false }) { Text("Отмена") }
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                var showDeleteDialog by remember { mutableStateOf(false) }
+                TextButton(onClick = { showDeleteDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Удалить аккаунт", color = MaterialTheme.colorScheme.error)
+                }
+                if (showDeleteDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showDeleteDialog = false },
+                        title = { Text("Удалить аккаунт?") },
+                        text = { Text("Вы уверены? Это навсегда удалит ваши настройки и колоды из облака. Это действие невозможно отменить.") },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                showDeleteDialog = false
+                                val user = FirebaseAuth.getInstance().currentUser
+                                if (user != null && currentNickname.isNotBlank()) {
+                                    // Удаляем данные из Realtime Database
+                                    FirebaseDatabase.getInstance().getReference("users/$currentNickname").removeValue()
+                                    // Само удаление аккаунта в Firebase Auth
+                                    user.delete().addOnCompleteListener { task ->
+                                        if (task.isSuccessful) {
+                                            // Очищаем локальные данные, чтобы при перезапуске выбросило на окно регистрации
+                                            prefs.edit().clear().apply()
+                                            context.getSharedPreferences(STUDY_PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+                                            context.getSharedPreferences("xp_prefs", Context.MODE_PRIVATE).edit().clear().apply()
+                                            Toast.makeText(context, "Аккаунт удален", Toast.LENGTH_SHORT).show()
+                                            // Перезапускаем приложение
+                                            val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                                            intent?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                                            context.startActivity(intent)
+                                            Runtime.getRuntime().exit(0)
+                                        } else {
+                                            Toast.makeText(context, "Ошибка: вам нужно перезайти в аккаунт перед удалением", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                }
+                            }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showDeleteDialog = false }) { Text("Отмена") }
+                        }
+                    )
+                }
             }
         }
         
-        Text("Тема", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
-        
-        var localThemeState by remember(pinkTheme) { mutableStateOf(pinkTheme) }
-        
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-            SegmentedButton(
-                selected = !localThemeState,
-                onClick = { 
-                    localThemeState = false
-                    onThemeChange(false) 
-                },
-                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                modifier = Modifier.weight(1f)
-            ) { Text("BLUE") }
-            SegmentedButton(
-                selected = localThemeState,
-                onClick = { 
-                    localThemeState = true
-                    onThemeChange(true) 
-                },
-                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                modifier = Modifier.weight(1f)
-            ) { Text("ROSE") }
+        // Раздел: Уведомления
+        Text("🔔 Уведомления", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp, start = 4.dp))
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                var pushEnabled by remember { mutableStateOf(prefs.getBoolean("push_enabled", true)) }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                        Text("Уведомления о сообщениях", fontWeight = FontWeight.Bold)
+                        Text("Уведомления из чата, новые колоды и запросы в друзья", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    }
+                    Switch(
+                        checked = pushEnabled,
+                        onCheckedChange = { isChecked ->
+                            pushEnabled = isChecked
+                            prefs.edit().putBoolean("push_enabled", isChecked).apply()
+                            
+                            if (isChecked) {
+                                // Восстанавливаем токен, если включили
+                                FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
+                                    FirebaseDatabase.getInstance().getReference("users/$currentNickname/fcmToken").setValue(token)
+                                }
+                            } else {
+                                // Удаляем токен из базы, чтобы сервер физически не мог прислать пуш
+                                FirebaseDatabase.getInstance().getReference("users/$currentNickname/fcmToken").removeValue()
+                            }
+                        }
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                var studyRemindersEnabled by remember { mutableStateOf(prefs.getBoolean("study_reminders_enabled", true)) }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                        Text("Напоминания об учебе", fontWeight = FontWeight.Bold)
+                        Text("Напоминать о ежедневном задании в 14:00 и 20:00", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    }
+                    Switch(
+                        checked = studyRemindersEnabled,
+                        onCheckedChange = { isChecked ->
+                            studyRemindersEnabled = isChecked
+                            prefs.edit().putBoolean("study_reminders_enabled", isChecked).apply()
+                            
+                            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                            val intent = Intent(context, StudyReminderReceiver::class.java)
+                            
+                            val pendingIntent14 = PendingIntent.getBroadcast(context, 14, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                            val pendingIntent20 = PendingIntent.getBroadcast(context, 20, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                            
+                            if (isChecked) {
+                                scheduleDailyAlarms(context)
+                            } else {
+                                alarmManager.cancel(pendingIntent14)
+                                alarmManager.cancel(pendingIntent20)
+                            }
+                        }
+                    )
+                }
+            }
         }
         
-        Text("Резервное копирование", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
-        Text("Сохраните ваши колоды и переписки в файл .zip. При сохранении вы можете выбрать Google Диск, чтобы файл сохранился в вашем облаке.", style = MaterialTheme.typography.bodySmall, color = Color.Gray, modifier = Modifier.padding(bottom = 8.dp))
-        Row(Modifier.fillMaxWidth().padding(bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { 
-                val date = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
-                exportLauncher.launch("catcards_backup_$date.zip") 
-            }, modifier = Modifier.weight(1f)) {
-                Text("Экспорт")
+        // Раздел: Внешний вид
+        Text("🎨 Внешний вид", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp, start = 4.dp))
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Цветовая тема", style = MaterialTheme.typography.labelMedium, color = Color.Gray, modifier = Modifier.padding(bottom = 8.dp))
+                
+                var localThemeState by remember(pinkTheme) { mutableStateOf(pinkTheme) }
+                
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    SegmentedButton(
+                        selected = !localThemeState,
+                        onClick = { 
+                            localThemeState = false
+                            onThemeChange(false) 
+                        },
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                        modifier = Modifier.weight(1f)
+                    ) { Text("BLUE") }
+                    SegmentedButton(
+                        selected = localThemeState,
+                        onClick = { 
+                            localThemeState = true
+                            onThemeChange(true) 
+                        },
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                        modifier = Modifier.weight(1f)
+                    ) { Text("ROSE") }
+                }
             }
-            OutlinedButton(onClick = { importLauncher.launch("application/zip") }, modifier = Modifier.weight(1f)) {
-                Text("Импорт")
+        }
+        
+        // Раздел: Данные и Память
+        Text("⚙️ Данные", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp, start = 4.dp))
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Резервное копирование", style = MaterialTheme.typography.labelMedium, color = Color.Gray, modifier = Modifier.padding(bottom = 4.dp))
+                Text(
+                    "Сохраните ваши колоды и переписки в файл .zip (можно сохранить в Google Диск).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { 
+                        val date = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
+                        exportLauncher.launch("catcards_backup_$date.zip") 
+                    }, modifier = Modifier.weight(1f)) {
+                        Text("Экспорт")
+                    }
+                    OutlinedButton(onClick = { importLauncher.launch("application/zip") }, modifier = Modifier.weight(1f)) {
+                        Text("Импорт")
+                    }
+                }
             }
         }
         
         Spacer(Modifier.weight(1f))
         
-        Button(
+        TextButton(
             onClick = { showDeveloperDialog = true },
             modifier = Modifier.fillMaxWidth()
-        ) { Text("Режим разработчика") }
+        ) { Text("Режим разработчика", color = Color.Gray) }
     }
     
     if (showRenameDialog) {
@@ -3163,6 +3343,11 @@ fun FlashcardApp(
                                                 // И ничего не удаляем из базы, так как это сделает слушатель внутри чата!
                                                 return
                                             }
+
+                                            // Проверяем настройку уведомлений (push_enabled)
+                                            // Если пользователь выключил уведомления в настройках, баннеры внутри приложения тоже не показываем
+                                            val pushEnabled = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE).getBoolean("push_enabled", true)
+                                            if (!pushEnabled) return
 
                                             // ПОКАЗЫВАЕМ БАННЕР, НО НЕ УДАЛЯЕМ СООБЩЕНИЕ!
                                             FirebaseDatabase.getInstance().getReference("users/$sender/avatar")
