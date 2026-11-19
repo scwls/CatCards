@@ -102,6 +102,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -449,18 +452,24 @@ data class InAppBannerData(
 fun InAppNotificationBanner(
     banner: InAppBannerData,
     onClick: () -> Unit,
+    onSendReply: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
     var visible by remember { mutableStateOf(false) }
     var offsetX by remember { mutableStateOf(0f) }
+    var isReplying by remember { mutableStateOf(false) }
+    var replyText by remember { mutableStateOf("") }
     val coroutineScope = rememberCoroutineScope()
+    val focusRequester = remember { FocusRequester() }
 
-    LaunchedEffect(banner.id) {
+    LaunchedEffect(banner.id, isReplying) {
         visible = true
-        delay(3500)
-        visible = false
-        delay(300)
-        onDismiss()
+        if (!isReplying) {
+            delay(3500)
+            visible = false
+            delay(300)
+            onDismiss()
+        }
     }
 
     AnimatedVisibility(
@@ -503,7 +512,7 @@ fun InAppNotificationBanner(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable {
+                .clickable(enabled = !isReplying) {
                     onDismiss()
                     onClick()
                 },
@@ -511,33 +520,76 @@ fun InAppNotificationBanner(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .background(MaterialTheme.colorScheme.surface, CircleShape),
-                    contentAlignment = Alignment.Center
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    AvatarImage(avatar = banner.avatarId, size = 40.dp)
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .background(MaterialTheme.colorScheme.surface, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        AvatarImage(avatar = banner.avatarId, size = 40.dp)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = banner.title,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Text(
+                            text = banner.message,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                        )
+                    }
+                    if (!isReplying) {
+                        IconButton(onClick = { isReplying = true }) {
+                            Icon(Icons.Filled.Edit, contentDescription = "Ответить", tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
                 }
-                Spacer(Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = banner.title,
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                    Text(
-                        text = banner.message,
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                    )
+                
+                AnimatedVisibility(visible = isReplying) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = replyText,
+                            onValueChange = { if (it.length <= 500) replyText = it },
+                            modifier = Modifier.weight(1f).focusRequester(focusRequester),
+                            placeholder = { Text("Ваш ответ...") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        IconButton(
+                            onClick = {
+                                if (replyText.isNotBlank()) {
+                                    onSendReply(replyText)
+                                    visible = false
+                                    coroutineScope.launch {
+                                        delay(300)
+                                        onDismiss()
+                                    }
+                                }
+                            },
+                            enabled = replyText.isNotBlank()
+                        ) {
+                            Icon(Icons.Filled.Check, contentDescription = "Отправить", tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                    
+                    LaunchedEffect(Unit) {
+                        focusRequester.requestFocus()
+                    }
                 }
             }
         }
@@ -3501,7 +3553,35 @@ fun FlashcardApp(
             onClick = {
                 activeSession = null
                 currentTab = MainTab.CHAT
-                directChatToOpen = banner.senderNickname // Передаем состояние в ChatScreen
+                directChatToOpen = banner.senderNickname
+            },
+            onSendReply = { replyText ->
+                val senderNickname = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE).getString(NICKNAME_KEY, "") ?: ""
+                val userAvatar = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE).getString("user_avatar", "img") ?: "img"
+                
+                if (senderNickname.isNotBlank()) {
+                    // 1. Сохраняем в базу данных
+                    val newMessage = mapOf(
+                        "text" to replyText,
+                        "timestamp" to System.currentTimeMillis()
+                    )
+                    FirebaseDatabase.getInstance().getReference("chat_inbox/${banner.senderNickname}/$senderNickname")
+                        .push().setValue(newMessage)
+                        
+                    // 2. Отправляем пуш-уведомление собеседнику
+                    val notificationData = mapOf(
+                        "action" to "CHAT_MESSAGE",
+                        "sender" to senderNickname,
+                        "message" to replyText,
+                        "avatarId" to userAvatar
+                    )
+                    sendSmartNotification(context, banner.senderNickname, notificationData)
+                    
+                    // 3. Сохраняем локально
+                    val history = loadChatHistory(context, banner.senderNickname).toMutableList()
+                    history.add(ChatMessage(replyText, isFromMe = true))
+                    saveChatHistory(context, banner.senderNickname, history)
+                }
             },
             onDismiss = { activeInAppBanner = null }
         )
