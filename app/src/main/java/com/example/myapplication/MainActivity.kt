@@ -1985,81 +1985,116 @@ fun SettingsScreen(
         }
     }
     
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp)
+    ) {
         Text("Настройки", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(bottom = 24.dp))
         
-        val currentEmail = prefs.getString("email", "") ?: ""
-        if (currentEmail.isNotBlank()) {
-            Text(
-                text = "Email: $currentEmail",
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
-        }
-        
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        // Раздел: Аккаунт
+        Text("👤 Аккаунт", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp, start = 4.dp))
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
         ) {
-            Text(
-                text = "Ваш ник: ${if (currentNickname.isNotBlank()) currentNickname else "не указан"}",
-                fontWeight = FontWeight.Bold
-            )
-            TextButton(onClick = { 
-                newNickname = currentNickname
-                renameError = null
-                showRenameDialog = true 
-            }) {
-                Text("Изменить")
+            Column(Modifier.padding(16.dp)) {
+                val currentEmail = prefs.getString("email", "") ?: ""
+                if (currentEmail.isNotBlank()) {
+                    Text(text = "Email", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+                    Text(text = currentEmail, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 12.dp))
+                }
+                
+                Text(text = "Никнейм", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (currentNickname.isNotBlank()) currentNickname else "не указан",
+                        fontWeight = FontWeight.Bold
+                    )
+                    TextButton(onClick = { 
+                        newNickname = currentNickname
+                        renameError = null
+                        showRenameDialog = true 
+                    }) {
+                        Text("Изменить")
+                    }
+                }
             }
         }
         
-        Text("Тема", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
-        
-        var localThemeState by remember(pinkTheme) { mutableStateOf(pinkTheme) }
-        
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-            SegmentedButton(
-                selected = !localThemeState,
-                onClick = { 
-                    localThemeState = false
-                    onThemeChange(false) 
-                },
-                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                modifier = Modifier.weight(1f)
-            ) { Text("BLUE") }
-            SegmentedButton(
-                selected = localThemeState,
-                onClick = { 
-                    localThemeState = true
-                    onThemeChange(true) 
-                },
-                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                modifier = Modifier.weight(1f)
-            ) { Text("ROSE") }
+        // Раздел: Внешний вид
+        Text("🎨 Внешний вид", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp, start = 4.dp))
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Цветовая тема", style = MaterialTheme.typography.labelMedium, color = Color.Gray, modifier = Modifier.padding(bottom = 8.dp))
+                
+                var localThemeState by remember(pinkTheme) { mutableStateOf(pinkTheme) }
+                
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    SegmentedButton(
+                        selected = !localThemeState,
+                        onClick = { 
+                            localThemeState = false
+                            onThemeChange(false) 
+                        },
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                        modifier = Modifier.weight(1f)
+                    ) { Text("BLUE") }
+                    SegmentedButton(
+                        selected = localThemeState,
+                        onClick = { 
+                            localThemeState = true
+                            onThemeChange(true) 
+                        },
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                        modifier = Modifier.weight(1f)
+                    ) { Text("ROSE") }
+                }
+            }
         }
         
-        Text("Резервное копирование", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
-        Text("Сохраните ваши колоды и переписки в файл .zip. При сохранении вы можете выбрать Google Диск, чтобы файл сохранился в вашем облаке.", style = MaterialTheme.typography.bodySmall, color = Color.Gray, modifier = Modifier.padding(bottom = 8.dp))
-        Row(Modifier.fillMaxWidth().padding(bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { 
-                val date = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
-                exportLauncher.launch("catcards_backup_$date.zip") 
-            }, modifier = Modifier.weight(1f)) {
-                Text("Экспорт")
-            }
-            OutlinedButton(onClick = { importLauncher.launch("application/zip") }, modifier = Modifier.weight(1f)) {
-                Text("Импорт")
+        // Раздел: Данные и Память
+        Text("⚙️ Данные", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp, start = 4.dp))
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Резервное копирование", style = MaterialTheme.typography.labelMedium, color = Color.Gray, modifier = Modifier.padding(bottom = 4.dp))
+                Text(
+                    "Сохраните ваши колоды и переписки в файл .zip (можно сохранить в Google Диск).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { 
+                        val date = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
+                        exportLauncher.launch("catcards_backup_$date.zip") 
+                    }, modifier = Modifier.weight(1f)) {
+                        Text("Экспорт")
+                    }
+                    OutlinedButton(onClick = { importLauncher.launch("application/zip") }, modifier = Modifier.weight(1f)) {
+                        Text("Импорт")
+                    }
+                }
             }
         }
         
         Spacer(Modifier.weight(1f))
         
-        Button(
+        TextButton(
             onClick = { showDeveloperDialog = true },
             modifier = Modifier.fillMaxWidth()
-        ) { Text("Режим разработчика") }
+        ) { Text("Режим разработчика", color = Color.Gray) }
     }
     
     if (showRenameDialog) {
