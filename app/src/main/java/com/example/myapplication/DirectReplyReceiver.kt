@@ -31,15 +31,14 @@ class DirectReplyReceiver : BroadcastReceiver() {
                 FirebaseDatabase.getInstance().getReference("chat_inbox/$recipientNickname/$currentNickname")
                     .push().setValue(newMessage)
                     
-                // 2. Инициируем отправку пуша собеседнику
+                // 2. Инициируем отправку пуша собеседнику (через новую функцию смарт-проверки)
                 val notificationData = mapOf(
                     "action" to "CHAT_MESSAGE",
                     "sender" to currentNickname,
                     "message" to replyText,
                     "avatarId" to userAvatar
                 )
-                FirebaseDatabase.getInstance().getReference("notificationRequests/$recipientNickname")
-                    .push().setValue(notificationData)
+                sendSmartNotification(context, recipientNickname, notificationData)
                     
                 // 3. Сохраняем в локальную историю чата
                 val history = loadChatHistory(context, recipientNickname).toMutableList()
