@@ -3344,6 +3344,11 @@ fun FlashcardApp(
                                                 return
                                             }
 
+                                            // Проверяем настройку уведомлений (push_enabled)
+                                            // Если пользователь выключил уведомления в настройках, баннеры внутри приложения тоже не показываем
+                                            val pushEnabled = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE).getBoolean("push_enabled", true)
+                                            if (!pushEnabled) return
+
                                             // ПОКАЗЫВАЕМ БАННЕР, НО НЕ УДАЛЯЕМ СООБЩЕНИЕ!
                                             FirebaseDatabase.getInstance().getReference("users/$sender/avatar")
                                                 .addListenerForSingleValueEvent(object : ValueEventListener {
