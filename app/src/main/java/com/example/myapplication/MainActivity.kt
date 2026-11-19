@@ -2024,6 +2024,151 @@ fun SettingsScreen(
                         Text("Изменить")
                     }
                 }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                var showPasswordDialog by remember { mutableStateOf(false) }
+                OutlinedButton(onClick = { showPasswordDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Изменить пароль")
+                }
+                if (showPasswordDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showPasswordDialog = false },
+                        title = { Text("Смена пароля") },
+                        text = { Text("Отправить ссылку для сброса пароля на вашу почту ($currentEmail)?") },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                FirebaseAuth.getInstance().sendPasswordResetEmail(currentEmail)
+                                    .addOnSuccessListener {
+                                        Toast.makeText(context, "Ссылка отправлена на почту", Toast.LENGTH_SHORT).show()
+                                    }
+                                    .addOnFailureListener { e ->
+                                        Toast.makeText(context, "Ошибка: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
+                                showPasswordDialog = false
+                            }) { Text("Отправить") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showPasswordDialog = false }) { Text("Отмена") }
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                var showDeleteDialog by remember { mutableStateOf(false) }
+                TextButton(onClick = { showDeleteDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Удалить аккаунт", color = MaterialTheme.colorScheme.error)
+                }
+                if (showDeleteDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showDeleteDialog = false },
+                        title = { Text("Удалить аккаунт?") },
+                        text = { Text("Вы уверены? Это навсегда удалит ваши настройки и колоды из облака. Это действие невозможно отменить.") },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                showDeleteDialog = false
+                                val user = FirebaseAuth.getInstance().currentUser
+                                if (user != null && currentNickname.isNotBlank()) {
+                                    // Удаляем данные из Realtime Database
+                                    FirebaseDatabase.getInstance().getReference("users/$currentNickname").removeValue()
+                                    // Само удаление аккаунта в Firebase Auth
+                                    user.delete().addOnCompleteListener { task ->
+                                        if (task.isSuccessful) {
+                                            // Очищаем локальные данные, чтобы при перезапуске выбросило на окно регистрации
+                                            prefs.edit().clear().apply()
+                                            context.getSharedPreferences(STUDY_PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+                                            context.getSharedPreferences("xp_prefs", Context.MODE_PRIVATE).edit().clear().apply()
+                                            Toast.makeText(context, "Аккаунт удален", Toast.LENGTH_SHORT).show()
+                                            // Перезапускаем приложение
+                                            val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                                            intent?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                                            context.startActivity(intent)
+                                            Runtime.getRuntime().exit(0)
+                                        } else {
+                                            Toast.makeText(context, "Ошибка: вам нужно перезайти в аккаунт перед удалением", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                }
+                            }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showDeleteDialog = false }) { Text("Отмена") }
+                        }
+                    )
+                }
+            }
+        }
+        
+        // Раздел: Уведомления
+        Text("🔔 Уведомления", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp, start = 4.dp))
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                var pushEnabled by remember { mutableStateOf(prefs.getBoolean("push_enabled", true)) }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                        Text("Уведомления о сообщениях", fontWeight = FontWeight.Bold)
+                        Text("Уведомления из чата, новые колоды и запросы в друзья", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    }
+                    Switch(
+                        checked = pushEnabled,
+                        onCheckedChange = { isChecked ->
+                            pushEnabled = isChecked
+                            prefs.edit().putBoolean("push_enabled", isChecked).apply()
+                            
+                            if (isChecked) {
+                                // Восстанавливаем токен, если включили
+                                FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
+                                    FirebaseDatabase.getInstance().getReference("users/$currentNickname/fcmToken").setValue(token)
+                                }
+                            } else {
+                                // Удаляем токен из базы, чтобы сервер физически не мог прислать пуш
+                                FirebaseDatabase.getInstance().getReference("users/$currentNickname/fcmToken").removeValue()
+                            }
+                        }
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                var studyRemindersEnabled by remember { mutableStateOf(prefs.getBoolean("study_reminders_enabled", true)) }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                        Text("Напоминания об учебе", fontWeight = FontWeight.Bold)
+                        Text("Напоминать о ежедневном задании в 14:00 и 20:00", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    }
+                    Switch(
+                        checked = studyRemindersEnabled,
+                        onCheckedChange = { isChecked ->
+                            studyRemindersEnabled = isChecked
+                            prefs.edit().putBoolean("study_reminders_enabled", isChecked).apply()
+                            
+                            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                            val intent = Intent(context, StudyReminderReceiver::class.java)
+                            
+                            val pendingIntent14 = PendingIntent.getBroadcast(context, 14, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                            val pendingIntent20 = PendingIntent.getBroadcast(context, 20, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                            
+                            if (isChecked) {
+                                scheduleDailyAlarms(context)
+                            } else {
+                                alarmManager.cancel(pendingIntent14)
+                                alarmManager.cancel(pendingIntent20)
+                            }
+                        }
+                    )
+                }
             }
         }
         
