@@ -96,8 +96,12 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.draw.clip
 import androidx.compose.animation.AnimatedVisibility
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -175,6 +179,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.runtime.key
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.core.app.Person
 import androidx.core.content.ContextCompat
@@ -399,6 +404,143 @@ fun scheduleDailyAlarms(context: Context) {
 
     setAlarmForHour(14, 14)
     setAlarmForHour(20, 20)
+}
+
+fun sendSmartNotification(
+    context: Context,
+    targetNickname: String,
+    notificationData: Map<String, Any>
+) {
+    val currentNickname = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
+        .getString(NICKNAME_KEY, "") ?: ""
+    val db = FirebaseDatabase.getInstance()
+    db.getReference("users/$targetNickname")
+        .addListenerForSingleValueEvent(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val isOnline = snapshot.child("is_online").getValue(Boolean::class.java) ?: false
+                val activeChatWith = snapshot.child("active_chat_with").getValue(String::class.java) ?: ""
+
+                // Отправляем пуш ТОЛЬКО если пользователь оффлайн И он сейчас не находится в диалоге с нами
+                if (!isOnline && activeChatWith != currentNickname) {
+                    db.getReference("notificationRequests/$targetNickname")
+                        .push()
+                        .setValue(notificationData)
+                }
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                db.getReference("notificationRequests/$targetNickname")
+                    .push()
+                    .setValue(notificationData)
+            }
+        })
+}
+
+data class InAppBannerData(
+    val id: Long = System.currentTimeMillis(),
+    val title: String,
+    val message: String,
+    val avatarId: String,
+    val senderNickname: String
+)
+
+@Composable
+fun InAppNotificationBanner(
+    banner: InAppBannerData,
+    onClick: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var visible by remember { mutableStateOf(false) }
+    var offsetX by remember { mutableStateOf(0f) }
+    val coroutineScope = rememberCoroutineScope()
+
+    LaunchedEffect(banner.id) {
+        visible = true
+        delay(3500)
+        visible = false
+        delay(300)
+        onDismiss()
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(300)) + slideInVertically(initialOffsetY = { -it }),
+        // Убрали анимацию выезда наверх при закрытии, так как баннер уже улетел вбок
+        exit = fadeOut(tween(150)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .offset { IntOffset(offsetX.roundToInt(), 0) }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        // Понизил порог до 1/3 ширины экрана или 200 пикселей (золотая середина)
+                        if (abs(offsetX) > size.width / 3f || abs(offsetX) > 200f) {
+                            // Берем размер экрана с хорошим запасом, чтобы баннер гарантированно улетел за края
+                            val targetOffset = if (offsetX > 0) size.width.toFloat() * 1.5f else -size.width.toFloat() * 1.5f
+                            coroutineScope.launch {
+                                // Замедляем анимацию смахивания с 200мс до 350мс
+                                animateSwipeOffset(offsetX, targetOffset, 350) { offsetX = it }
+                                visible = false
+                                delay(50)
+                                onDismiss()
+                            }
+                        } else {
+                            coroutineScope.launch {
+                                // Возврат на место тоже делаем чуть более плавным (с 150мс до 250мс)
+                                animateSwipeOffset(offsetX, 0f, 250) { offsetX = it }
+                            }
+                        }
+                    },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        offsetX += dragAmount
+                    }
+                )
+            }
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    onDismiss()
+                    onClick()
+                },
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(MaterialTheme.colorScheme.surface, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AvatarImage(avatar = banner.avatarId, size = 40.dp)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = banner.title,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Text(
+                        text = banner.message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -1038,119 +1180,130 @@ fun GuestProfileScreen(
     }
 
     if (showSendDeckDialog) {
-        val context = LocalContext.current
-        val myBlocks = remember { loadBlocksFromStorage(context) ?: emptyList() }
-        var isSending by remember { mutableStateOf(false) }
-        var sendStatusMessage by remember { mutableStateOf<String?>(null) }
-        
-        val csvPicker = rememberLauncherForActivityResult(
-            ActivityResultContracts.GetContent()
-        ) { uri: Uri? ->
-            if (uri != null) {
-                isSending = true
-                val name = getFileName(context, uri).removeSuffix(".csv")
-                val cards = loadFlashcardsFromUri(context, uri)
-                if (cards.isNotEmpty()) {
-                    sendDeckToUser(
-                        context = context,
-                        targetUserNickname = userNickname,
-                        deckName = name,
-                        cards = cards,
-                        onSuccess = {
-                            isSending = false
-                            Toast.makeText(context, "Колода «$name» отправлена $userNickname!", Toast.LENGTH_SHORT).show()
-                            showSendDeckDialog = false
-                        },
-                        onFailure = { err ->
-                            isSending = false
-                            sendStatusMessage = err
-                        }
-                    )
-                } else {
-                    isSending = false
-                    sendStatusMessage = "Не удалось прочитать карточки из файла"
-                }
+        SendDeckDialog(
+            targetUserNickname = userNickname,
+            onDismiss = { showSendDeckDialog = false }
+        )
+    }
+}
+
+@Composable
+fun SendDeckDialog(
+    targetUserNickname: String,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val myBlocks = remember { loadBlocksFromStorage(context) ?: emptyList() }
+    var isSending by remember { mutableStateOf(false) }
+    var sendStatusMessage by remember { mutableStateOf<String?>(null) }
+    
+    val csvPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            isSending = true
+            val name = getFileName(context, uri).removeSuffix(".csv")
+            val cards = loadFlashcardsFromUri(context, uri)
+            if (cards.isNotEmpty()) {
+                sendDeckToUser(
+                    context = context,
+                    targetUserNickname = targetUserNickname,
+                    deckName = name,
+                    cards = cards,
+                    onSuccess = {
+                        isSending = false
+                        Toast.makeText(context, "Колода «$name» отправлена $targetUserNickname!", Toast.LENGTH_SHORT).show()
+                        onDismiss()
+                    },
+                    onFailure = { err ->
+                        isSending = false
+                        sendStatusMessage = err
+                    }
+                )
+            } else {
+                isSending = false
+                sendStatusMessage = "Не удалось прочитать карточки из файла"
             }
         }
+    }
 
-        Dialog(onDismissRequest = { if (!isSending) showSendDeckDialog = false }) {
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Отправить колоду", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("Выберите колоду для $userNickname", style = MaterialTheme.typography.bodySmall, color = Color.Gray, modifier = Modifier.padding(bottom = 16.dp))
-                    
-                    if (isSending) {
-                        CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+    Dialog(onDismissRequest = { if (!isSending) onDismiss() }) {
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Отправить колоду", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Выберите колоду для $targetUserNickname", style = MaterialTheme.typography.bodySmall, color = Color.Gray, modifier = Modifier.padding(bottom = 16.dp))
+                
+                if (isSending) {
+                    CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+                } else {
+                    if (myBlocks.isEmpty()) {
+                        Text("У вас пока нет сохраненных колод", color = Color.Gray, modifier = Modifier.padding(vertical = 12.dp))
                     } else {
-                        if (myBlocks.isEmpty()) {
-                            Text("У вас пока нет сохраненных колод", color = Color.Gray, modifier = Modifier.padding(vertical = 12.dp))
-                        } else {
-                            LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
-                                items(myBlocks) { block ->
-                                    Card(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 4.dp)
-                                            .clickable {
-                                                isSending = true
-                                                sendDeckToUser(
-                                                    context = context,
-                                                    targetUserNickname = userNickname,
-                                                    deckName = block.name,
-                                                    cards = block.cards,
-                                                    onSuccess = {
-                                                        isSending = false
-                                                        Toast.makeText(context, "Колода «${block.name}» отправлена $userNickname!", Toast.LENGTH_SHORT).show()
-                                                        showSendDeckDialog = false
-                                                    },
-                                                    onFailure = { err ->
-                                                        isSending = false
-                                                        sendStatusMessage = err
-                                                    }
-                                                )
-                                            },
-                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                        LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
+                            items(myBlocks) { block ->
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp)
+                                        .clickable {
+                                            isSending = true
+                                            sendDeckToUser(
+                                                context = context,
+                                                targetUserNickname = targetUserNickname,
+                                                deckName = block.name,
+                                                cards = block.cards,
+                                                onSuccess = {
+                                                    isSending = false
+                                                    Toast.makeText(context, "Колода «${block.name}» отправлена $targetUserNickname!", Toast.LENGTH_SHORT).show()
+                                                    onDismiss()
+                                                },
+                                                onFailure = { err ->
+                                                    isSending = false
+                                                    sendStatusMessage = err
+                                                }
+                                            )
+                                        },
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(block.name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                                            Text("${block.cards.size} шт.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                                        }
+                                        Text(block.name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                        Text("${block.cards.size} шт.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                                     }
                                 }
                             }
                         }
-                        
-                        Spacer(modifier = Modifier.height(12.dp))
-                        
-                        OutlinedButton(
-                            onClick = { csvPicker.launch("*/*") },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Из файла (.csv)")
-                        }
-                    }
-                    
-                    sendStatusMessage?.let {
-                        Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
                     }
                     
                     Spacer(modifier = Modifier.height(12.dp))
                     
-                    TextButton(
-                        onClick = { showSendDeckDialog = false },
-                        enabled = !isSending,
+                    OutlinedButton(
+                        onClick = { csvPicker.launch("*/*") },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Отмена")
+                        Text("Из файла (.csv)")
                     }
+                }
+                
+                sendStatusMessage?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+                }
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                TextButton(
+                    onClick = onDismiss,
+                    enabled = !isSending,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Отмена")
                 }
             }
         }
@@ -1158,7 +1311,7 @@ fun GuestProfileScreen(
 }
 
 @Composable
-fun ProfileScreen() {
+fun ProfileScreen(blocks: MutableList<FlashcardBlock>) {
     val context = LocalContext.current
     val prefs = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
     val nickname = prefs.getString(NICKNAME_KEY, "Пользователь") ?: "Пользователь"
@@ -1180,7 +1333,8 @@ fun ProfileScreen() {
         ChatDetailScreen(
             recipient = selectedChatUser!!,
             onBack = { selectedChatUser = null },
-            onViewProfile = { profileToView = selectedChatUser }
+            onViewProfile = { profileToView = selectedChatUser },
+            blocks = blocks
         )
     } else {
         var description by remember { mutableStateOf(prefs.getString("user_description", "") ?: "") }
@@ -1420,6 +1574,7 @@ fun FriendsDialog(
     onDismiss: () -> Unit,
     onFriendClick: (String) -> Unit = {}
 ) {
+    val context = LocalContext.current
     var currentTab by remember { mutableStateOf(0) } // 0 = Мои, 1 = Поиск, 2 = Запросы
     var friendIdInput by remember { mutableStateOf("") }
     var statusMessage by remember { mutableStateOf<String?>(null) }
@@ -1619,17 +1774,14 @@ fun FriendsDialog(
                                                 // Отправляем пуш-уведомление пользователю
                                                 // Игнорируем ошибку, используем стандартную аватарку, 
                                                 // так как внутри LaunchedEffect не всегда есть доступ к context
-                                                val userAvatar = "🐱"
+                                                val userAvatar = "img"
                                                 val notificationData = mapOf(
                                                     "action" to "FRIEND_REQUEST",
                                                     "sender" to currentNickname,
                                                     "message" to "Хочет добавить вас в друзья!",
                                                     "avatarId" to userAvatar
                                                 )
-                                                FirebaseDatabase.getInstance()
-                                                    .getReference("notificationRequests/$target")
-                                                    .push()
-                                                    .setValue(notificationData)
+                                                sendSmartNotification(context, target, notificationData)
                                                     
                                                 statusMessage = "Запрос отправлен!"
                                                 friendIdInput = ""
@@ -1680,16 +1832,14 @@ fun FriendsDialog(
                                                 db.getReference("friend_requests/$currentNickname/$sender").removeValue()
                                                 
                                                 // Уведомляем отправителя, что мы приняли его заявку
-                                                val userAvatar = "🐱" // Аналогично, упрощаем до дефолтной аватарки в этом скоупе
+                                                val userAvatar = "img"
                                                 val notificationData = mapOf(
                                                     "action" to "FRIEND_ACCEPT",
                                                     "sender" to currentNickname,
                                                     "message" to "Принял вашу заявку в друзья!",
                                                     "avatarId" to userAvatar
                                                 )
-                                                db.getReference("notificationRequests/$sender")
-                                                    .push()
-                                                    .setValue(notificationData)
+                                                sendSmartNotification(context, sender, notificationData)
                                             }) {
                                                 Icon(Icons.Filled.Check, contentDescription = "Принять", tint = Color(0xFF2E7D32))
                                             }
@@ -1910,6 +2060,10 @@ fun SettingsScreen(
 
 data class ChatMessage(val text: String, val isFromMe: Boolean, val timestamp: Long = System.currentTimeMillis()) : Serializable
 
+fun formatMessageTime(timestamp: Long): String {
+    return SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timestamp))
+}
+
 fun saveChatHistory(context: Context, partner: String, messages: List<ChatMessage>) {
     try {
         val file = File(context.filesDir, "chat_${partner}.dat")
@@ -1938,7 +2092,8 @@ fun loadChatHistory(context: Context, partner: String): List<ChatMessage> {
 fun ChatDetailScreen(
     recipient: String,
     onBack: () -> Unit,
-    onViewProfile: () -> Unit
+    onViewProfile: () -> Unit,
+    blocks: MutableList<FlashcardBlock>
 ) {
     BackHandler(enabled = true) {
         onBack()
@@ -1950,7 +2105,31 @@ fun ChatDetailScreen(
     val currentNickname = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
         .getString(NICKNAME_KEY, null)
         
-    var recipientAvatar by remember { mutableStateOf("🐱") }
+    var recipientAvatar by remember { mutableStateOf("img") }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, recipient, currentNickname) {
+        var chatRef: DatabaseReference? = null
+        if (!currentNickname.isNullOrBlank()) {
+            chatRef = FirebaseDatabase.getInstance().getReference("users/$currentNickname/active_chat_with")
+        }
+
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME || event == Lifecycle.Event.ON_START) {
+                chatRef?.setValue(recipient)
+                chatRef?.onDisconnect()?.setValue("")
+            } else if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                chatRef?.setValue("")
+            }
+        }
+        
+        lifecycleOwner.lifecycle.addObserver(observer)
+        
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            chatRef?.setValue("")
+        }
+    }
 
     LaunchedEffect(recipient) {
         FirebaseDatabase.getInstance().getReference("users/$recipient/avatar")
@@ -1975,8 +2154,9 @@ fun ChatDetailScreen(
             listener = object : ChildEventListener {
                 override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
                     val text = snapshot.child("text").getValue(String::class.java)
+                    val ts = snapshot.child("timestamp").getValue(Long::class.java) ?: System.currentTimeMillis()
                     if (text != null) {
-                        messages.add(ChatMessage(text, isFromMe = false))
+                        messages.add(ChatMessage(text, isFromMe = false, timestamp = ts))
                         saveChatHistory(context, recipient, messages)
                         snapshot.ref.removeValue() // Удаляем из облака после получения
                     }
@@ -2036,31 +2216,97 @@ fun ChatDetailScreen(
                     horizontalArrangement = if (msg.isFromMe) Arrangement.End else Arrangement.Start,
                     verticalAlignment = Alignment.Bottom
                 ) {
-                    if (!msg.isFromMe) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
-                                .clickable { onViewProfile() },
-                            contentAlignment = Alignment.Center
+                    if (msg.text.startsWith("DECK:::")) {
+                        val parts = msg.text.split(":::")
+                        val deckName = parts.getOrNull(1) ?: "Колода"
+                        val cardCount = parts.getOrNull(2) ?: "0"
+                        var isDownloading by remember { mutableStateOf(false) }
+
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (msg.isFromMe) MaterialTheme.colorScheme.primaryContainer 
+                                                 else MaterialTheme.colorScheme.surfaceVariant
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.widthIn(max = 280.dp)
                         ) {
-                            AvatarImage(avatar = recipientAvatar, size = 28.dp)
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("🎴", fontSize = 28.sp)
+                                    Spacer(Modifier.width(8.dp))
+                                    Column {
+                                        Text(text = "Колода «$deckName»", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                        Text(text = "$cardCount карточек", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                    }
+                                }
+                                
+                                val isAlreadyDownloaded = blocks.any { it.name.equals(deckName, ignoreCase = true) }
+
+                                if (!msg.isFromMe && !isAlreadyDownloaded) {
+                                    Spacer(Modifier.height(8.dp))
+                                    Button(
+                                        onClick = {
+                                            isDownloading = true
+                                            downloadSpecificSharedDeck(
+                                                context = context,
+                                                deckName = deckName,
+                                                blocks = blocks,
+                                                onSuccess = { name ->
+                                                    isDownloading = false
+                                                    Toast.makeText(context, "Колода «$name» добавлена на экран колод!", Toast.LENGTH_SHORT).show()
+                                                },
+                                                onFailure = { err ->
+                                                    isDownloading = false
+                                                    Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                                }
+                                            )
+                                        },
+                                        enabled = !isDownloading,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        if (isDownloading) {
+                                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
+                                        } else {
+                                            Text("Скачать", fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+
+                                Text(
+                                    text = formatMessageTime(msg.timestamp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                    modifier = Modifier.align(Alignment.End).padding(top = 4.dp)
+                                )
+                            }
                         }
-                        Spacer(Modifier.width(8.dp))
-                    }
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (msg.isFromMe) MaterialTheme.colorScheme.primaryContainer 
-                                             else MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text(msg.text, modifier = Modifier.padding(12.dp))
+                    } else {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (msg.isFromMe) MaterialTheme.colorScheme.primaryContainer 
+                                                 else MaterialTheme.colorScheme.surfaceVariant
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                                Text(msg.text)
+                                Text(
+                                    text = formatMessageTime(msg.timestamp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                    modifier = Modifier.align(Alignment.End).padding(top = 2.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
         
+        var showSendDeckDialog by remember { mutableStateOf(false) }
+
         Column(
             Modifier.fillMaxWidth().padding(16.dp)
         ) {
@@ -2084,6 +2330,17 @@ fun ChatDetailScreen(
                     }
                 )
                 Spacer(Modifier.width(8.dp))
+
+                if (messageText.isBlank()) {
+                    OutlinedButton(
+                        onClick = { showSendDeckDialog = true },
+                        modifier = Modifier.padding(bottom = 20.dp)
+                    ) {
+                        Text("Колода", maxLines = 1, fontSize = 12.sp)
+                    }
+                    Spacer(Modifier.width(4.dp))
+                }
+
                 Button(
                     onClick = {
                         if (messageText.isNotBlank() && currentNickname != null) {
@@ -2101,34 +2358,54 @@ fun ChatDetailScreen(
                                 
                             // Также отправляем как уведомление (существующая логика), 
                             // но добавим имя отправителя, чтобы было понятно от кого
-                            val userAvatar = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE).getString("user_avatar", "🐱") ?: "🐱"
+                            val userAvatar = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE).getString("user_avatar", "img") ?: "img"
                             val notificationData = mapOf(
                                 "action" to "CHAT_MESSAGE",
                                 "sender" to currentNickname,
                                 "message" to messageText,
                                 "avatarId" to userAvatar
                             )
-                            FirebaseDatabase.getInstance().getReference("notificationRequests/$recipient")
-                                .push().setValue(notificationData)
+                            sendSmartNotification(context, recipient, notificationData)
                                 
                             messageText = ""
                         }
                     },
-                    modifier = Modifier.padding(bottom = 20.dp) // Выравнивание кнопки из-за supportingText
+                    enabled = messageText.isNotBlank(),
+                    modifier = Modifier.padding(bottom = 20.dp)
                 ) {
-                    Text("Отправить")
+                    Text(">", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 }
             }
+        }
+
+        if (showSendDeckDialog) {
+            SendDeckDialog(
+                targetUserNickname = recipient,
+                onDismiss = { showSendDeckDialog = false }
+            )
         }
     }
 }
 
 @Composable
-fun ChatScreen() {
+fun ChatScreen(
+    blocks: MutableList<FlashcardBlock>,
+    directChatToOpen: String?,
+    onDirectChatHandled: () -> Unit
+) {
     var users by remember { mutableStateOf<Map<String, UserActivity>>(emptyMap()) }
     var usersError by remember { mutableStateOf<String?>(null) }
-    var selectedChatUser by remember { mutableStateOf<String?>(null) }
+    var selectedChatUser by remember { mutableStateOf<String?>(directChatToOpen) }
     var profileToView by remember { mutableStateOf<String?>(null) }
+    var inboxSnapshot by remember { mutableStateOf<DataSnapshot?>(null) }
+    
+    // Если пришел запрос на прямое открытие, обрабатываем его
+    LaunchedEffect(directChatToOpen) {
+        if (directChatToOpen != null) {
+            selectedChatUser = directChatToOpen
+            onDirectChatHandled()
+        }
+    }
     
     BackHandler(enabled = profileToView != null) {
         profileToView = null
@@ -2141,6 +2418,26 @@ fun ChatScreen() {
     val context = LocalContext.current
     val currentNickname = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
         .getString(NICKNAME_KEY, null)
+        
+    DisposableEffect(currentNickname) {
+        var inboxRef: DatabaseReference? = null
+        var listener: ValueEventListener? = null
+        if (!currentNickname.isNullOrBlank()) {
+            inboxRef = FirebaseDatabase.getInstance().getReference("chat_inbox/$currentNickname")
+            listener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    inboxSnapshot = snapshot
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            }
+            inboxRef.addValueEventListener(listener!!)
+        }
+        onDispose {
+            if (inboxRef != null && listener != null) {
+                inboxRef!!.removeEventListener(listener!!)
+            }
+        }
+    }
         
     LaunchedEffect(currentNickname) {
         if (currentNickname == null) return@LaunchedEffect
@@ -2201,7 +2498,8 @@ fun ChatScreen() {
         ChatDetailScreen(
             recipient = selectedChatUser!!,
             onBack = { selectedChatUser = null },
-            onViewProfile = { profileToView = selectedChatUser }
+            onViewProfile = { profileToView = selectedChatUser },
+            blocks = blocks
         )
     } else {
         Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -2226,6 +2524,13 @@ fun ChatScreen() {
             } else {
                 LazyColumn(modifier = Modifier.weight(1f)) {
                     items(users.toList()) { (user, activity) ->
+                        val friendInbox = inboxSnapshot?.child(user)
+                        val unreadCount = friendInbox?.childrenCount?.toInt() ?: 0
+
+                        val unreadLastTs = friendInbox?.children?.mapNotNull { it.child("timestamp").getValue(Long::class.java) }?.maxOrNull()
+                        val localLastTs = remember(user, inboxSnapshot) { loadChatHistory(context, user).lastOrNull()?.timestamp }
+                        val displayTime = listOfNotNull(unreadLastTs, localLastTs).maxOrNull()
+
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -2251,8 +2556,30 @@ fun ChatScreen() {
                                     Text(user, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                                 }
                                 
-                                IconButton(onClick = { selectedChatUser = user }) {
-                                    Text("💬", fontSize = 18.sp)
+                                Column(horizontalAlignment = Alignment.End) {
+                                    if (displayTime != null && displayTime > 0) {
+                                        Text(
+                                            text = formatMessageTime(displayTime),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color.Gray,
+                                            modifier = Modifier.padding(bottom = 4.dp)
+                                        )
+                                    }
+                                    if (unreadCount > 0) {
+                                        Box(
+                                            modifier = Modifier
+                                                .background(MaterialTheme.colorScheme.primary, CircleShape)
+                                                .padding(horizontal = 8.dp, vertical = 2.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = unreadCount.toString(),
+                                                color = MaterialTheme.colorScheme.onPrimary,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2592,6 +2919,9 @@ fun FlashcardApp(
     var availableCloudDecks by remember { mutableStateOf(0) }
     var currentTab by rememberSaveable { mutableStateOf(MainTab.DECKS) }
     var comboBonusToAnimate by remember { mutableStateOf<Int?>(null) }
+    var hasUnreadChatMessages by remember { mutableStateOf(false) }
+    var activeInAppBanner by remember { mutableStateOf<InAppBannerData?>(null) }
+    var directChatToOpen by remember { mutableStateOf<String?>(null) }
     
     val xpPrefs = context.getSharedPreferences("xp_prefs", Context.MODE_PRIVATE)
     var currentSessionXp by remember { mutableStateOf(xpPrefs.getInt("total_xp", 0)) }
@@ -2668,6 +2998,129 @@ fun FlashcardApp(
         onDispose {
             if (decksRef != null && listener != null) {
                 decksRef!!.removeEventListener(listener!!)
+            }
+        }
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, nickname) {
+        var onlineRef: DatabaseReference? = null
+        if (!nickname.isNullOrBlank()) {
+            onlineRef = FirebaseDatabase.getInstance().getReference("users/$nickname/is_online")
+        }
+
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME || event == Lifecycle.Event.ON_START) {
+                // Приложение открыто (на экране)
+                onlineRef?.setValue(true)
+                onlineRef?.onDisconnect()?.setValue(false)
+            } else if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                // Приложение свернуто (в фоне)
+                onlineRef?.setValue(false)
+            }
+        }
+        
+        lifecycleOwner.lifecycle.addObserver(observer)
+        
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            onlineRef?.setValue(false)
+        }
+    }
+
+    DisposableEffect(nickname) {
+        var inboxRef: DatabaseReference? = null
+        var listener: ChildEventListener? = null
+        val launchTime = System.currentTimeMillis() // Запоминаем время запуска экрана
+        val shownBanners = mutableSetOf<String>()
+
+        if (!nickname.isNullOrBlank()) {
+            inboxRef = FirebaseDatabase.getInstance().getReference("chat_inbox/$nickname")
+            listener = object : ChildEventListener {
+                override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
+                    // Используем .ref для чтения обновлений внутри узла этого отправителя
+                    snapshot.ref.addValueEventListener(object : ValueEventListener {
+                        override fun onDataChange(senderSnap: DataSnapshot) {
+                            val sender = senderSnap.key ?: return
+                            
+                            // Перебираем ВСЕ сообщения от этого отправителя
+                            for (msgSnap in senderSnap.children) {
+                                val msgKey = msgSnap.key ?: continue
+                                if (shownBanners.contains(msgKey)) continue
+
+                                val text = msgSnap.child("text").getValue(String::class.java) ?: ""
+                                val timestamp = msgSnap.child("timestamp").getValue(Long::class.java) ?: 0L
+
+                                // Если сообщение старое (до запуска приложения), мы его просто ИГНОРИРУЕМ
+                                // (его заберет другой слушатель в ChatScreen для отображения кружочка с цифрой)
+                                if (timestamp < launchTime) {
+                                    shownBanners.add(msgKey)
+                                    continue
+                                }
+
+                                shownBanners.add(msgKey)
+
+                                // Если дошли сюда, значит сообщение новое.
+                                val isDeck = text.startsWith("DECK:::")
+                                val displayMsg = if (isDeck) "Отправил вам колоду 🎴" else text
+
+                                FirebaseDatabase.getInstance().getReference("users/$nickname/active_chat_with")
+                                    .addListenerForSingleValueEvent(object : ValueEventListener {
+                                        override fun onDataChange(activeChatSnap: DataSnapshot) {
+                                            val currentActiveChat = activeChatSnap.getValue(String::class.java) ?: ""
+                                            if (currentActiveChat == sender) {
+                                                // Пользователь прямо сейчас в этом чате! Никаких баннеров не показываем!
+                                                // И ничего не удаляем из базы, так как это сделает слушатель внутри чата!
+                                                return
+                                            }
+
+                                            // ПОКАЗЫВАЕМ БАННЕР, НО НЕ УДАЛЯЕМ СООБЩЕНИЕ!
+                                            FirebaseDatabase.getInstance().getReference("users/$sender/avatar")
+                                                .addListenerForSingleValueEvent(object : ValueEventListener {
+                                                    override fun onDataChange(avSnap: DataSnapshot) {
+                                                        val av = avSnap.getValue(String::class.java) ?: "img"
+                                                        activeInAppBanner = InAppBannerData(
+                                                            title = sender,
+                                                            message = displayMsg,
+                                                            avatarId = av,
+                                                            senderNickname = sender
+                                                        )
+                                                    }
+                                                    override fun onCancelled(error: DatabaseError) {}
+                                                })
+                                        }
+                                        override fun onCancelled(error: DatabaseError) {}
+                                    })
+                                
+                                // Выходим из цикла, показав баннер для первого нового сообщения
+                                break 
+                            }
+                        }
+                        override fun onCancelled(error: DatabaseError) {}
+                    })
+                }
+                override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {}
+                override fun onChildRemoved(snapshot: DataSnapshot) {}
+                override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {}
+                override fun onCancelled(error: DatabaseError) {}
+            }
+            inboxRef.addChildEventListener(listener)
+            
+            // Добавляем ValueEventListener для подсчета общего количества непрочитанных
+            inboxRef.addValueEventListener(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    var totalUnread = 0L
+                    for (senderSnap in snapshot.children) {
+                        totalUnread += senderSnap.childrenCount
+                    }
+                    hasUnreadChatMessages = totalUnread > 0
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            })
+        }
+        onDispose {
+            if (inboxRef != null && listener != null) {
+                inboxRef.removeEventListener(listener)
             }
         }
     }
@@ -2764,7 +3217,19 @@ fun FlashcardApp(
                     NavigationBarItem(
                         selected = currentTab == MainTab.CHAT,
                         onClick = { currentTab = MainTab.CHAT },
-                        icon = { Icon(Icons.Filled.Email, contentDescription = "Чат") },
+                        icon = {
+                            Box {
+                                Icon(Icons.Filled.Email, contentDescription = "Чат")
+                                if (hasUnreadChatMessages) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .background(Color.Red, CircleShape)
+                                            .align(Alignment.TopEnd)
+                                    )
+                                }
+                            }
+                        },
                         label = { Text("Чат") }
                     )
                 }
@@ -2772,7 +3237,7 @@ fun FlashcardApp(
         ) { paddingValues ->
             Box(modifier = modifier.padding(paddingValues).fillMaxSize()) {
                 when (currentTab) {
-                    MainTab.PROFILE -> ProfileScreen()
+                    MainTab.PROFILE -> ProfileScreen(blocks = blocks)
                     MainTab.DECKS -> {
                         BlockSelectionScreen(
                             blocks = blocks,
@@ -2803,7 +3268,13 @@ fun FlashcardApp(
                             onThemeChange = onThemeChange
                         )
                     }
-                    MainTab.CHAT -> ChatScreen()
+                    MainTab.CHAT -> {
+                        ChatScreen(
+                            blocks = blocks,
+                            directChatToOpen = directChatToOpen,
+                            onDirectChatHandled = { directChatToOpen = null }
+                        )
+                    }
                 }
             }
         }
@@ -2983,6 +3454,18 @@ fun FlashcardApp(
         ComboAnimationOverlay(
             amount = amount,
             onDismiss = { comboBonusToAnimate = null }
+        )
+    }
+
+    activeInAppBanner?.let { banner ->
+        InAppNotificationBanner(
+            banner = banner,
+            onClick = {
+                activeSession = null
+                currentTab = MainTab.CHAT
+                directChatToOpen = banner.senderNickname // Передаем состояние в ChatScreen
+            },
+            onDismiss = { activeInAppBanner = null }
         )
     }
 }
@@ -4110,22 +4593,75 @@ fun sendDeckToUser(
                     ) = Unit
                 })
                 
-            val userAvatar = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE).getString("user_avatar", "🐱") ?: "🐱"
+            val userAvatar = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE).getString("user_avatar", "img") ?: "img"
             val notificationData = mapOf(
                 "action" to "NEW_DECK",
                 "sender" to myNickname,
-                "message" to "Отправил вам колоду «$deckName». Откройте «Из облака», чтобы скачать её.",
+                "message" to "Отправил вам колоду «$deckName». Откройте чат, чтобы скачать её.",
                 "avatarId" to userAvatar
             )
-            FirebaseDatabase.getInstance()
-                .getReference("notificationRequests/$targetUserNickname")
-                .push()
-                .setValue(notificationData)
+            sendSmartNotification(context, targetUserNickname, notificationData)
+
+            // 1. Отправляем карточку колоды в chat_inbox получателя
+            val deckMessageText = "DECK:::$deckName:::${cards.size}"
+            val newMessage = mapOf(
+                "text" to deckMessageText,
+                "timestamp" to System.currentTimeMillis()
+            )
+            FirebaseDatabase.getInstance().getReference("chat_inbox/$targetUserNickname/$myNickname")
+                .push().setValue(newMessage)
+
+            // 2. Сохраняем карточку колоды в историю своего чата
+            val myHistory = loadChatHistory(context, targetUserNickname).toMutableList()
+            myHistory.add(ChatMessage(deckMessageText, isFromMe = true))
+            saveChatHistory(context, targetUserNickname, myHistory)
                 
             onSuccess()
         }
         .addOnFailureListener { error ->
             onFailure(error.message ?: "Не удалось отправить колоду")
+        }
+}
+
+fun downloadSpecificSharedDeck(
+    context: Context,
+    deckName: String,
+    blocks: MutableList<FlashcardBlock>,
+    onSuccess: (String) -> Unit,
+    onFailure: (String) -> Unit
+) {
+    val nickname = context.getSharedPreferences(NICKNAME_PREFS, Context.MODE_PRIVATE)
+        .getString(NICKNAME_KEY, null) ?: return
+        
+    val safeDeckName = deckName.replace(Regex("[^A-Za-z0-9А-Яа-яёЁ._-]"), "_")
+    val fileName = "$safeDeckName.csv"
+    val storageRef = FirebaseStorage.getInstance().reference.child("decks/$nickname/$fileName")
+    
+    storageRef.getBytes(10L * 1024L * 1024L)
+        .addOnSuccessListener { bytes ->
+            val cards = parseFlashcardsFromCsv(bytes)
+            storageRef.delete().addOnCompleteListener {
+                decrementAvailableDeckCount(nickname)
+                if (cards.isNotEmpty()) {
+                    val existingIndex = blocks.indexOfFirst { it.name.equals(deckName, ignoreCase = true) }
+                    if (existingIndex >= 0) {
+                        blocks[existingIndex] = FlashcardBlock(deckName, cards)
+                    } else {
+                        blocks.add(FlashcardBlock(deckName, cards))
+                    }
+                    saveBlocksToStorage(context, blocks)
+                    onSuccess(deckName)
+                } else {
+                    onFailure("Файл колоды пуст")
+                }
+            }
+        }
+        .addOnFailureListener {
+            if (blocks.any { it.name.equals(deckName, ignoreCase = true) }) {
+                onSuccess("$deckName (уже на экране колод)")
+            } else {
+                onFailure("Колода недоступна для скачивания")
+            }
         }
 }
 
@@ -4150,28 +4686,25 @@ fun downloadSharedDecks(
                 }
 
                 val file = result.items[index]
+                val deckName = file.name.removeSuffix(".csv")
+                val alreadyExists = blocks.any { it.name.equals(deckName, ignoreCase = true) }
+
                 file.getBytes(10L * 1024L * 1024L)
                     .addOnSuccessListener { bytes ->
                         val cards = parseFlashcardsFromCsv(bytes)
-                        file.delete()
-                            .addOnSuccessListener {
-                                decrementAvailableDeckCount(nickname)
-                                if (cards.isNotEmpty()) {
-                                    blocks.add(
-                                        FlashcardBlock(
-                                            file.name.removeSuffix(".csv"),
-                                            cards
-                                        )
-                                    )
-                                }
-                                processNext(index + 1)
+                        file.delete().addOnCompleteListener {
+                            decrementAvailableDeckCount(nickname)
+                            if (!alreadyExists && cards.isNotEmpty()) {
+                                blocks.add(FlashcardBlock(deckName, cards))
                             }
-                            .addOnFailureListener {
-                                processNext(index + 1)
-                            }
+                            processNext(index + 1)
+                        }
                     }
                     .addOnFailureListener {
-                        processNext(index + 1)
+                        file.delete().addOnCompleteListener {
+                            decrementAvailableDeckCount(nickname)
+                            processNext(index + 1)
+                        }
                     }
             }
 
