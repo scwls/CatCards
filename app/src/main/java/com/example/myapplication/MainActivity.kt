@@ -182,6 +182,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.core.app.Person
+import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.IconCompat
 import com.google.android.gms.tasks.Task
@@ -629,15 +630,52 @@ fun showAdminMessageNotification(
 
     val messagingStyle = NotificationCompat.MessagingStyle(senderPerson)
         .addMessage(message, System.currentTimeMillis(), senderPerson)
+        
+    // --- Добавляем логику Direct Reply ---
+    val replyLabel = "Ответить..."
+    val remoteInput: RemoteInput = RemoteInput.Builder("key_text_reply")
+        .setLabel(replyLabel)
+        .build()
+
+    // Для каждого пользователя мы создаем уникальный ID уведомления,
+    // чтобы при ответе закрывать именно его
+    val notificationId = title.hashCode()
+
+    val replyIntent = Intent(context, DirectReplyReceiver::class.java).apply {
+        action = "REPLY_ACTION"
+        putExtra("recipient_nickname", title) // title - это ник отправителя
+        putExtra("notification_id", notificationId)
+    }
+    
+    // Используем FLAG_MUTABLE, так как RemoteInput требует изменения интента системой
+    val replyPendingIntent: PendingIntent =
+        PendingIntent.getBroadcast(
+            context,
+            notificationId,
+            replyIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+        )
+
+    val action: NotificationCompat.Action =
+        NotificationCompat.Action.Builder(
+            R.drawable.ic_dialog_info, // Иконка (в современных Android не отображается)
+            "Ответить",
+            replyPendingIntent
+        )
+        .addRemoteInput(remoteInput)
+        .setAllowGeneratedReplies(true)
+        .build()
+    // -------------------------------------
 
     val notification = NotificationCompat.Builder(context, channelId)
         .setSmallIcon(R.drawable.ic_dialog_info)
         .setStyle(messagingStyle)
+        .addAction(action)
         .setContentIntent(pendingIntent)
         .setAutoCancel(true)
         .build()
 
-    notificationManager.notify(System.currentTimeMillis().toInt(), notification)
+    notificationManager.notify(notificationId, notification)
 }
 
 class MainActivity : ComponentActivity() {

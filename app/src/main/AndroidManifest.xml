@@ -36,6 +36,14 @@
             android:name=".StudyReminderReceiver"
             android:exported="false" />
 
+        <receiver
+            android:name=".DirectReplyReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="REPLY_ACTION" />
+            </intent-filter>
+        </receiver>
+
         <service
             android:name=".FirebaseMessagingService"
             android:exported="false">
